@@ -52,7 +52,7 @@ def detect_snake(video_path: str, output_image_path: str, max_samples: int = 20)
     best_confidence = 0.0
     best_prediction = None
     best_frame = None
-    tracked_detections = []  # Store all tracked detections
+    tracked_detections = None  # Store tracking data for the best frame
 
     print(f"[Detection] Sampling {len(frame_indices)} frames from video with ByteTrack")
 

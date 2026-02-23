@@ -3,11 +3,16 @@ from pydantic import BaseModel
 from typing import List, Optional
 import os
 import uvicorn
+import sys
+from pathlib import Path
 
-from .detection import detect_snake
-from .classification import classify_snake
-from .alerts import send_whatsapp_alert
-from .storage import save_detection, get_history
+# Add parent directory to path so imports work
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from backend.detection import detect_snake
+from backend.classification import classify_snake
+from backend.alerts import send_whatsapp_alert
+from backend.storage import save_detection, get_history
 
 app = FastAPI(title="SarpGuard API", version="1.0")
 
