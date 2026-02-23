@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+streamlit
+ultralytics
+opencv-python
+requests
+twilio
+python-dotenv
+python-multipart
