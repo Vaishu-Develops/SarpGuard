@@ -54,23 +54,28 @@ async def detect(background_tasks: BackgroundTasks, file: UploadFile = File(...)
     readable_timestamp = datetime.now().strftime("%d-%b-%Y %H:%M")
     
     uid = uuid.uuid4().hex[:8]
-    video_filename = f"temp_{timestamp_str}_{uid}.mp4"
+    ext = os.path.splitext(file.filename)[1] if file.filename else ".mp4"
+    if not ext:
+        ext = ".mp4"
+        
+    video_filename = f"temp_{timestamp_str}_{uid}{ext}"
     image_filename = f"detected_images/detected_{timestamp_str}_{uid}.jpg"
+    crop_filename = f"detected_images/crop_{timestamp_str}_{uid}.jpg"
     
     with open(video_filename, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
     try:
-        # 1. Detection
-        detected, yolo_conf = detect_snake(video_filename, image_filename)
+        # 1. Detection (Layer 1 YOLO object detection - finds region of interest)
+        detected, yolo_conf, actual_crop_path = detect_snake(video_filename, image_filename, crop_filename)
         
         status = "Harmless"
         confidence = 0.0
         alert_sent = False
         
         if detected:
-            # 2. Classification using real Roboflow API
-            status, classification_conf = classify_snake(image_filename, mock=False)
+            # 2. Classification using real Roboflow API (Layer 3 - Applied strictly to the CROP)
+            status, classification_conf = classify_snake(actual_crop_path, mock=False)
             confidence = classification_conf * 100
             
             # Confidence Threshold: Reject false positives from Object Detection (e.g. butterflies)
@@ -107,6 +112,8 @@ async def detect(background_tasks: BackgroundTasks, file: UploadFile = File(...)
         # Cleanup video, keep image for dashboard
         if os.path.exists(video_filename):
             os.remove(video_filename)
+        if os.path.exists(crop_filename):
+            os.remove(crop_filename)
 
 @app.get("/history", response_model=List[DetectionRecord])
 def history():
