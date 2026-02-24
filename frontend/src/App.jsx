@@ -98,7 +98,10 @@ export default function App() {
     const timestamp = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')} ${now.getHours() >= 12 ? 'PM' : 'AM'}`;
 
     return (
-        <div className="w-full min-h-screen bg-slate-50 font-sans text-slate-900 selection:bg-processing/30">
+        <div className="w-full min-h-screen bg-surface font-mono text-slate-200 selection:bg-processing/30 overflow-hidden relative border-[8px] border-surface">
+            {/* Ambient background grid lines */}
+            <div className="absolute inset-0 pointer-events-none opacity-[0.03] bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:40px_40px]"></div>
+
             {screen === 'upload' && (
                 <UploadScreen
                     onAnalyze={handleAnalyze}
