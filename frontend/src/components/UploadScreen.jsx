@@ -15,11 +15,15 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
     const fileInputRef = useRef(null);
     const webcamRef = useRef(null);
     const mediaRecorderRef = useRef(null);
+    const canvasRef = useRef(null);
+    const hasTriggeredRef = useRef(false);
 
     const [isCameraActive, setIsCameraActive] = useState(false);
     const [capturing, setCapturing] = useState(false);
     const [recordedChunks, setRecordedChunks] = useState([]);
     const [recordingTime, setRecordingTime] = useState(0);
+    const [isLiveDetecting, setIsLiveDetecting] = useState(false);
+    const [liveDetections, setLiveDetections] = useState([]);
 
     const handleFileSelect = (e) => {
         const selected = e.target.files?.[0];
@@ -89,6 +93,110 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
             setCapturing(false);
         }
     }, [capturing, recordingTime]);
+
+    // Real-Time Detection Loop
+    useEffect(() => {
+        let intervalId;
+
+        const detectLiveFrame = async () => {
+            if (!webcamRef.current || !isLiveDetecting) return;
+
+            const imageSrc = webcamRef.current.getScreenshot();
+            if (!imageSrc) return;
+
+            try {
+                const response = await fetch("http://localhost:8000/detect-live", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ frame: imageSrc })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    setLiveDetections(data.boxes || []);
+
+                    // AUTO-TRIGGER LOGIC
+                    if (data.detected && data.boxes && data.boxes.length > 0 && location && !hasTriggeredRef.current) {
+                        // Check if at least one box has decent confidence from the fast model
+                        const validThreat = data.boxes.some(b => b.confidence > 0.40);
+                        if (validThreat) {
+                            hasTriggeredRef.current = true;
+                            setIsLiveDetecting(false);
+
+                            // Convert base64 dataURI to Blob cleanly using fetch
+                            const fetchRes = await fetch(imageSrc);
+                            const blob = await fetchRes.blob();
+
+                            // Create File matching API format
+                            const frameFile = new File([blob], `live_threat_${Date.now()}.jpg`, { type: 'image/jpeg' });
+                            setFile(frameFile);
+
+                            // Immediately process this file directly bypassing closure state
+                            onAnalyze(frameFile);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("Live detection error:", err);
+            }
+        };
+
+        if (isLiveDetecting && isCameraActive && !hasTriggeredRef.current) {
+            intervalId = setInterval(detectLiveFrame, 1000); // Check every 1 second
+        } else {
+            setLiveDetections([]); // Clear boxes if turned off
+            if (canvasRef.current) {
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+            }
+        }
+
+        return () => {
+            if (intervalId) clearInterval(intervalId);
+        };
+    }, [isLiveDetecting, isCameraActive]);
+
+    // Draw bounding boxes when liveDetections state changes
+    useEffect(() => {
+        if (!canvasRef.current || !webcamRef.current || !webcamRef.current.video) return;
+
+        const video = webcamRef.current.video;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+
+        // Use the EXACT natural resolution of the video for the drawing canvas
+        // Adding the CSS `object-cover` class will force the browser to scale/crop both canvas and video identically
+        const videoWidth = video.videoWidth;
+        const videoHeight = video.videoHeight;
+
+        canvas.width = videoWidth;
+        canvas.height = videoHeight;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (liveDetections.length === 0) return;
+
+        liveDetections.forEach(box => {
+            // Convert center (x,y) to top-left corner using raw image dimensions from Roboflow
+            const w = box.width;
+            const h = box.height;
+            const x = box.x - (w / 2);
+            const y = box.y - (h / 2);
+
+            // Draw glowing box
+            ctx.strokeStyle = '#F43F5E'; // Cyber Rose
+            ctx.lineWidth = 3;
+            ctx.shadowColor = '#F43F5E';
+            ctx.shadowBlur = 10;
+            ctx.strokeRect(x, y, w, h);
+
+            // Draw label
+            ctx.fillStyle = '#F43F5E';
+            ctx.shadowBlur = 0;
+            ctx.font = '12px "Rajdhani", monospace';
+            ctx.fillText(`THREAT ${(box.confidence * 100).toFixed(1)}%`, x, y - 5);
+        });
+
+    }, [liveDetections]);
 
     return (
         <div className="w-full h-full min-h-screen p-4 md:p-8 flex flex-col justify-center items-center relative z-10">
@@ -181,11 +289,19 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
                             <div className="flex flex-col gap-4 h-full min-h-[240px]">
                                 {isCameraActive ? (
                                     <div className="relative w-full h-full flex flex-col items-center justify-center bg-black border border-processing overflow-hidden shadow-[0_0_15px_rgba(56,189,248,0.3)]">
-                                        <Webcam
-                                            audio={false}
-                                            ref={webcamRef}
-                                            className="w-full h-full object-cover opacity-80"
-                                        />
+                                        <div className="relative w-full h-full flex items-center justify-center bg-black">
+                                            <Webcam
+                                                audio={false}
+                                                ref={webcamRef}
+                                                screenshotFormat="image/jpeg"
+                                                videoConstraints={{ facingMode: "environment" }}
+                                                className="absolute inset-0 w-full h-full object-cover opacity-80"
+                                            />
+                                            <canvas
+                                                ref={canvasRef}
+                                                className="absolute inset-0 w-full h-full object-cover pointer-events-none z-10 block"
+                                            />
+                                        </div>
 
                                         {/* Camera Overlay HUD */}
                                         <div className="absolute inset-0 pointer-events-none border-[4px] border-black/50"></div>
@@ -200,7 +316,20 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
                                         </div>
 
                                         {/* Recording Controls */}
-                                        <div className="absolute bottom-6 flex gap-4 z-20">
+                                        <div className="absolute bottom-6 flex flex-wrap justify-center gap-4 z-20 w-full px-4">
+                                            {!capturing && (
+                                                <button
+                                                    onClick={() => setIsLiveDetecting(!isLiveDetecting)}
+                                                    className={`border font-bold tracking-widest text-[10px] uppercase px-4 py-2 hover:bg-opacity-80 transition-all flex items-center gap-2 ${isLiveDetecting
+                                                        ? 'bg-danger/20 border-danger text-danger shadow-[0_0_15px_rgba(244,63,94,0.4)]'
+                                                        : 'bg-processing/10 border-processing text-processing'
+                                                        }`}
+                                                >
+                                                    <Crosshair size={14} className={isLiveDetecting ? "animate-spin-slow" : ""} />
+                                                    {isLiveDetecting ? "ACTIVE TRACKING: ON" : "ENABLE LIVE TRACKING"}
+                                                </button>
+                                            )}
+
                                             {capturing ? (
                                                 <button
                                                     onClick={handleStopCaptureClick}
@@ -215,13 +344,17 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
                                                     className="bg-processing/20 border border-processing text-processing font-bold tracking-widest text-[10px] uppercase px-4 py-2 hover:bg-processing hover:text-black transition-all flex items-center gap-2"
                                                 >
                                                     <Video size={14} />
-                                                    INITIATE CAPTURE LOOP
+                                                    RECORD 10S
                                                 </button>
                                             )}
 
                                             {!capturing && (
                                                 <button
-                                                    onClick={() => setIsCameraActive(false)}
+                                                    onClick={() => {
+                                                        setIsCameraActive(false);
+                                                        setIsLiveDetecting(false);
+                                                        setLiveDetections([]);
+                                                    }}
                                                     className="bg-surface/80 border border-slate-600 text-slate-300 font-bold tracking-widest text-[10px] uppercase px-4 py-2 hover:bg-slate-700 transition-all"
                                                 >
                                                     ABORT

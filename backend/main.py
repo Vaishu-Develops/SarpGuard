@@ -10,7 +10,7 @@ from pathlib import Path
 # Add parent directory to path so imports work
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from backend.detection import detect_snake
+from backend.detection import detect_snake, detect_snake_frame
 from backend.classification import classify_snake
 from backend.alerts import send_whatsapp_alert
 from backend.storage import save_detection, get_history
@@ -37,6 +37,9 @@ class DetectionRecord(BaseModel):
     status: str
     confidence: float
     image_path: str
+    
+class LiveFrame(BaseModel):
+    frame: str
     
 @app.get("/")
 def read_root():
@@ -114,6 +117,21 @@ async def detect(background_tasks: BackgroundTasks, file: UploadFile = File(...)
             os.remove(video_filename)
         if os.path.exists(crop_filename):
             os.remove(crop_filename)
+
+@app.post("/detect-live")
+async def detect_live(data: LiveFrame):
+    """
+    Very fast endpoint for real-time live webcam streaming.
+    Accepts a base64 encoded frame, returns bounding box coordinates.
+    Does NOT save to History database automatically to prevent 
+    spamming the system with records during live view.
+    """
+    detected, boxes, frame, _ = detect_snake_frame(data.frame)
+    
+    return {
+        "detected": detected,
+        "boxes": boxes
+    }
 
 @app.get("/history", response_model=List[DetectionRecord])
 def history():

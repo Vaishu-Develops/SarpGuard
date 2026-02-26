@@ -1,0 +1,14 @@
+ M .gitignore
+ M backend/alerts.py
+ M backend/main.py
+?? backend/test_inference.py
+?? frontend/index.html
+?? frontend/package.json
+?? frontend/pnpm-lock.yaml
+?? frontend/pnpm-workspace.yaml
+?? frontend/src/
+?? frontend/vite.config.js
+?? git_status_check.txt
+?? init.js
+?? setup.py
+?? test_video.mp4

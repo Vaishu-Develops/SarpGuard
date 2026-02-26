@@ -31,14 +31,16 @@ export default function App() {
 
     const locationName = location ? LOCATIONS[location]?.name || location : '';
 
-    const handleAnalyze = async () => {
+    const handleAnalyze = async (overrideFile = null) => {
+        const fileToUse = overrideFile || file;
+
         setScreen('processing');
         setIsReady(false);
 
         const startTime = Date.now();
 
         const formData = new FormData();
-        formData.append('file', file);
+        formData.append('file', fileToUse);
         formData.append('location', locationName);
 
         let resultHasSnake = false;
