@@ -137,3 +137,16 @@ create_test_video.py
 yolov8n.pt
 snake_yolo.pt
 detections.json
+
+# Node.js and build output
+node_modules/
+dist/
+dist-ssr/
+*.local
+.env.local
+.env.*.local
+
+# Logs and temp files
+log_test.txt
+git_status.txt
+git_status_new.txt
