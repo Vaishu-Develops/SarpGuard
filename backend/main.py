@@ -10,9 +10,9 @@ from pathlib import Path
 # Add parent directory to path so imports work
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from backend.detection import detect_snake, detect_snake_frame
+from backend.detection import detect_snake, detect_snake_frame, detect_screen_artifact
 from backend.classification import classify_snake
-from backend.alerts import send_whatsapp_alert
+from backend.alerts import send_whatsapp_alert, send_tamper_alert
 from backend.storage import save_detection, get_history
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -67,9 +67,47 @@ async def detect(background_tasks: BackgroundTasks, file: UploadFile = File(...)
     
     with open(video_filename, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-        
+    
     try:
-        # 1. Detection (Layer 1 YOLO object detection - finds region of interest)
+        import cv2 as _cv2
+        import numpy as _np
+        
+        # === LAYER 0: Anti-Spoofing Screen Detection ===
+        # Check if the input is a photo/video of a phone/monitor screen before running detection
+        try:
+            if ext.lower() in [".jpg", ".jpeg", ".png"]:
+                # For images, decode directly
+                raw = open(video_filename, "rb").read()
+                np_arr = _np.frombuffer(raw, _np.uint8)
+                spoof_frame = _cv2.imdecode(np_arr, _cv2.IMREAD_COLOR)
+            else:
+                # For video, grab just the first frame
+                cap_spoof = _cv2.VideoCapture(video_filename)
+                ret, spoof_frame = cap_spoof.read()
+                cap_spoof.release()
+                if not ret:
+                    spoof_frame = None
+            
+            if spoof_frame is not None:
+                is_spoof, spoof_conf, spoof_reason = detect_screen_artifact(spoof_frame)
+                print(f"[Layer 0 AntiSpoof] is_screen={is_spoof}, score={spoof_conf:.2f}, reason={spoof_reason}")
+                
+                if is_spoof:
+                    # Block the alert, send tamper notification instead
+                    send_tamper_alert(location, spoof_conf, spoof_reason)
+                    return {
+                        "status": "Media Spoof Detected",
+                        "confidence": spoof_conf * 100,
+                        "image_path": "",
+                        "alert_sent": False,
+                        "spoof_reason": spoof_reason,
+                        "timestamp": readable_timestamp
+                    }
+        except Exception as spoof_err:
+            # Don't crash; if anti-spoof check fails, proceed with normal detection
+            print(f"[Layer 0 AntiSpoof] ⚠️ Check failed, skipping: {spoof_err}")
+        
+        # === LAYER 1+: Normal Detection Pipeline ===
         detected, yolo_conf, actual_crop_path = detect_snake(video_filename, image_filename, crop_filename)
         
         status = "Harmless"
