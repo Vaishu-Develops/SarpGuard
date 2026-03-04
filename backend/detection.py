@@ -18,16 +18,16 @@ CLIENT = InferenceHTTPClient(
 # Initialize ByteTrack for snake tracking across frames
 byte_tracker = sv.ByteTrack()
 
-def detect_snake(video_path: str, output_image_path: str, max_samples: int = 20) -> tuple[bool, float]:
+def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, max_samples: int = 20) -> tuple[bool, float, str]:
     """
     Samples multiple frames from the video, runs Roboflow snake-detection/2 detection,
     uses ByteTrack to track snake movement across frames,
-    saves annotated frame with tracking info, and returns (detected, confidence).
+    saves annotated frame with tracking info, and returns (detected, confidence, crop_path).
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print("[Detection] Could not open video.")
-        return False, 0.0
+        return False, 0.0, ""
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS) or 25
@@ -125,6 +125,29 @@ def detect_snake(video_path: str, output_image_path: str, max_samples: int = 20)
         os.remove(temp_image_path)
 
     if best_prediction is not None and best_frame is not None:
+        # ─── EXTRACT CROP BEFORE ANNOTATING ───
+        # This isolates the object so the classification model isn't confused by background noise.
+        x, y = int(best_prediction["x"]), int(best_prediction["y"])
+        w, h = int(best_prediction["width"]), int(best_prediction["height"])
+        
+        # Add 10% padding to the bounding box crop
+        pad_x = int(w * 0.1)
+        pad_y = int(h * 0.1)
+        
+        frame_h, frame_w = best_frame.shape[:2]
+        crop_x1 = max(0, x - w // 2 - pad_x)
+        crop_y1 = max(0, y - h // 2 - pad_y)
+        crop_x2 = min(frame_w, x + w // 2 + pad_x)
+        crop_y2 = min(frame_h, y + h // 2 + pad_y)
+        
+        crop_img = best_frame[crop_y1:crop_y2, crop_x1:crop_x2]
+        final_crop_path = ""
+        if crop_img.size > 0:
+            cv2.imwrite(crop_image_path, crop_img)
+            final_crop_path = crop_image_path
+        else:
+            final_crop_path = output_image_path  # Fallback
+            
         # Draw detections with annotations using supervision
         if tracked_detections is not None and len(tracked_detections) > 0:
             # Use supervision's box annotator for clean visualization
@@ -150,7 +173,7 @@ def detect_snake(video_path: str, output_image_path: str, max_samples: int = 20)
 
         cv2.imwrite(output_image_path, best_frame)
         print(f"[Detection] Best detection: {best_confidence*100:.1f}% confidence | Annotated with supervision")
-        return True, best_confidence
+        return True, best_confidence, final_crop_path
     else:
         # No snake detected in any frame — save the middle frame as fallback
         cap = cv2.VideoCapture(video_path)
@@ -160,4 +183,4 @@ def detect_snake(video_path: str, output_image_path: str, max_samples: int = 20)
         if ret:
             cv2.imwrite(output_image_path, frame)
         print("[Detection] No snake found in any sampled frame.")
-        return False, 0.0
+        return False, 0.0, ""
