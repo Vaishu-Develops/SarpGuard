@@ -33,16 +33,17 @@ def send_whatsapp_alert(location: str, confidence: float, mock: bool = False):
         print(f"[WhatsApp] 🔄 Creating Twilio client and sending message...")
         client = Client(account_sid, auth_token)
         
-        # Use content_sid for pre-approved template messages
+        # Send plain text message for snake detection alerts
         message = client.messages.create(
             from_=f"whatsapp:{whatsapp_from}",
-            content_sid=content_sid,
-            content_variables=f'{{"1":"{location}","2":"{confidence*100:.0f}%"}}',
+            body=f"🐍 SARPGUARD ALERT\n📍 Location: {location}\n⚠️ VENOMOUS snake detected\n📊 Confidence: {confidence*100:.0f}%",
             to=f"whatsapp:{whatsapp_to}"
         )
         
         print(f"[WhatsApp Alert] ✅ SUCCESS - Message SID: {message.sid}")
         print(f"[WhatsApp Alert] ✅ Sent to {whatsapp_to}")
+        print(f"[WhatsApp Alert] ✅ Location: {location} | Confidence: {confidence*100:.0f}%")
+        return True
         print(f"[WhatsApp Alert] ✅ Location: {location} | Confidence: {confidence*100:.0f}%")
         return True
         
