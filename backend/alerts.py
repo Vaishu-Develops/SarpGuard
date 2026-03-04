@@ -58,3 +58,46 @@ def send_whatsapp_alert(location: str, confidence: float, status: str, mock: boo
         import traceback
         traceback.print_exc()
         return False
+
+
+def send_tamper_alert(location: str, spoof_confidence: float, reason: str) -> bool:
+    """
+    Sends a WhatsApp TAMPER ALERT when a phone screen / media spoofing attempt is detected.
+    """
+    load_dotenv(override=True)
+    env_values = dotenv_values(".env")
+    
+    account_sid = os.getenv("TWILIO_ACCOUNT_SID") or env_values.get("TWILIO_ACCOUNT_SID")
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN") or env_values.get("TWILIO_AUTH_TOKEN")
+    whatsapp_from = os.getenv("TWILIO_WHATSAPP_FROM") or env_values.get("TWILIO_WHATSAPP_FROM") or "+14155238886"
+    whatsapp_to = os.getenv("TWILIO_TO_WHATSAPP") or env_values.get("TWILIO_TO_WHATSAPP")
+    
+    if not auth_token:
+        print(f"[MOCK TAMPER] Someone tried to spoof the system at {location}!")
+        return True
+    
+    try:
+        client = Client(account_sid, auth_token)
+        current_time = datetime.now().strftime("%d-%b-%Y %I:%M %p")
+        
+        message = client.messages.create(
+            from_=f"whatsapp:{whatsapp_from}",
+            body=(
+                f"🚨 SARPGUARD - TAMPER ALERT!\n"
+                f"⏱️ Time: {current_time}\n"
+                f"📍 Location: {location}\n"
+                f"⚠️ PHONE VIDEO DETECTED\n"
+                f"👤 Someone tried to trigger a fake snake alert using a phone screen/video\n"
+                f"🔍 Detection confidence: {spoof_confidence*100:.0f}%\n"
+                f"📋 Reason: {reason}\n\n"
+                f"This alert was BLOCKED. No real snake threat confirmed."
+            ),
+            to=f"whatsapp:{whatsapp_to}"
+        )
+        
+        print(f"[Tamper Alert] ✅ Tamper WhatsApp sent: {message.sid}")
+        return True
+        
+    except Exception as e:
+        print(f"[Tamper Alert] ❌ ERROR: {e}")
+        return False
