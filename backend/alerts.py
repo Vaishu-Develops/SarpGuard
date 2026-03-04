@@ -2,7 +2,9 @@ import os
 from twilio.rest import Client
 from dotenv import load_dotenv, dotenv_values
 
-def send_whatsapp_alert(location: str, confidence: float, mock: bool = False):
+from datetime import datetime
+
+def send_whatsapp_alert(location: str, confidence: float, status: str, mock: bool = False):
     """
     Sends a WhatsApp alert using Twilio with pre-approved template message.
     Reads credentials fresh from .env file each time.
@@ -33,18 +35,22 @@ def send_whatsapp_alert(location: str, confidence: float, mock: bool = False):
         print(f"[WhatsApp] 🔄 Creating Twilio client and sending message...")
         client = Client(account_sid, auth_token)
         
+        current_time = datetime.now().strftime("%d-%b-%Y %I:%M %p")
+        
+        status_icon = "⚠️" if status.upper() == "VENOMOUS" else "🟢"
+        threat_text = "VENOMOUS snake detected" if status.upper() == "VENOMOUS" else "Non-venomous (Harmless) snake detected"
+        instruction = "Please do not approach the area. Security team has been notified." if status.upper() == "VENOMOUS" else "Snake identified as harmless. Standard removal procedures apply."
+        
         # Send plain text message for snake detection alerts
         message = client.messages.create(
             from_=f"whatsapp:{whatsapp_from}",
-            body=f"🐍 SARPGUARD ALERT\n📍 Location: {location}\n⚠️ VENOMOUS snake detected\n📊 Confidence: {confidence*100:.0f}%",
+            body=f"🐍 SARPGUARD ALERT\n⏱️ Time: {current_time}\n📍 Location: {location}\n{status_icon} {threat_text}\n📊 Confidence: {confidence:.0f}%\n\n{instruction}",
             to=f"whatsapp:{whatsapp_to}"
         )
         
         print(f"[WhatsApp Alert] ✅ SUCCESS - Message SID: {message.sid}")
         print(f"[WhatsApp Alert] ✅ Sent to {whatsapp_to}")
-        print(f"[WhatsApp Alert] ✅ Location: {location} | Confidence: {confidence*100:.0f}%")
-        return True
-        print(f"[WhatsApp Alert] ✅ Location: {location} | Confidence: {confidence*100:.0f}%")
+        print(f"[WhatsApp Alert] ✅ Location: {location} | Confidence: {confidence:.0f}%")
         return True
         
     except Exception as e:
