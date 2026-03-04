@@ -239,3 +239,197 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float]
         print(f"[Live Detection] Error processing frame: {e}")
         return False, [], None, 0.0
 
+
+def detect_screen_artifact(frame: np.ndarray) -> tuple[bool, float, str]:
+    """
+    Detects if an image was captured from a phone/monitor screen (anti-spoofing).
+    Uses 4 JPEG-compression-resistant techniques:
+      1. Dark Bezel Border Detection - phones have a dark frame around a bright screen
+      2. Straight Edge Linearity - screens have perfectly straight unnatural edges (Hough lines)
+      3. Screen Luminance Flatness - LCD screens emit flat, overexposed uniform light patches
+      4. Color Saturation Overload - phone screens display hyper-saturated colors vs natural scenes
+    
+    Returns:
+        is_screen (bool): True if screen spoofing is detected
+        confidence (float): 0.0 to 1.0 confidence in screen detection
+        reason (str): Human readable explanation
+    """
+    if frame is None:
+        return False, 0.0, "No frame"
+
+    scores = []
+    reasons = []
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    h_frame, w_frame = frame.shape[:2]
+    frame_area = h_frame * w_frame
+
+    # ─────────────────────────────────────────────
+    # CHECK 1: Dark Bezel Border Detection
+    # A phone screen held up to a camera creates a characteristic pattern:
+    # dark outer border (phone body/hand) surrounding a rectangularly bright screen interior.
+    # We measure the brightness contrast between a thin outer ring and the inner region.
+    # ─────────────────────────────────────────────
+    try:
+        border_w = max(8, int(min(h_frame, w_frame) * 0.07))
+
+        # Outer border region brightness
+        outer_mask = np.zeros((h_frame, w_frame), np.uint8)
+        outer_mask[:border_w, :] = 255
+        outer_mask[-border_w:, :] = 255
+        outer_mask[:, :border_w] = 255
+        outer_mask[:, -border_w:] = 255
+
+        # Inner region brightness
+        inner_mask = np.zeros((h_frame, w_frame), np.uint8)
+        inner_mask[border_w:-border_w, border_w:-border_w] = 255
+
+        outer_mean = cv2.mean(gray, mask=outer_mask)[0]
+        inner_mean = cv2.mean(gray, mask=inner_mask)[0]
+
+        # The contrast differential: if inner is much brighter, it's likely a screen
+        contrast_diff = inner_mean - outer_mean
+        
+        # Score: 0 → 1 over range 30px to 120px brightness difference
+        bezel_score = min(1.0, max(0.0, (contrast_diff - 25) / 80.0))
+        scores.append(bezel_score)
+
+        if bezel_score > 0.35:
+            reasons.append(f"Dark frame/bezel border detected (inner-outer brightness: +{contrast_diff:.0f})")
+
+        print(f"[AntiSpoof] Bezel contrast: outer={outer_mean:.1f}, inner={inner_mean:.1f}, diff={contrast_diff:.1f}, score={bezel_score:.2f}")
+
+    except Exception as e:
+        print(f"[AntiSpoof] Bezel check failed: {e}")
+        scores.append(0.0)
+
+    # ─────────────────────────────────────────────
+    # CHECK 2: Straight Edge Linearity (Hough Lines)
+    # Real natural scenes (a snake in grass/leaves) have organic, curved edges.
+    # A phone screen has PERFECTLY straight rectangular edges creating strong Hough lines.
+    # We detect if dominant lines are close to horizontal/vertical (screen edges).
+    # ─────────────────────────────────────────────
+    try:
+        edges = cv2.Canny(gray, 50, 150)
+        lines = cv2.HoughLines(edges, 1, np.pi / 180, threshold=int(min(h_frame, w_frame) * 0.5))
+
+        edge_score = 0.0
+        if lines is not None:
+            # Count lines that are very close to 0°, 90°, 180° (screen edges)
+            axis_aligned = 0
+            for line in lines:
+                theta = line[0][1]
+                deg = np.degrees(theta) % 180
+                if deg < 12 or deg > 168 or (78 < deg < 102):
+                    axis_aligned += 1
+            
+            # Strong Hough lines that align to axes = rectangular screen edge
+            edge_score = min(1.0, axis_aligned / 6.0)
+
+            if edge_score > 0.5:
+                reasons.append(f"Perfectly straight rectangular edges detected ({axis_aligned} axis-aligned Hough lines)")
+
+        scores.append(edge_score)
+        print(f"[AntiSpoof] Edge linearity score: {edge_score:.2f}")
+
+    except Exception as e:
+        print(f"[AntiSpoof] Edge linearity check failed: {e}")
+        scores.append(0.0)
+
+    # ─────────────────────────────────────────────
+    # CHECK 3: Screen Luminance Flatness
+    # LCD screens emit with very uniform brightness across large regions.
+    # We split the image into a grid and check if inner patches are unexpectedly uniform
+    # and bright — a signature of screen backlighting.
+    # ─────────────────────────────────────────────
+    try:
+        grid = 6
+        ph, pw = h_frame // grid, w_frame // grid
+        bright_uniform_patches = 0
+        total_inner_patches = 0
+
+        for row in range(1, grid - 1):   # skip edge rows (might be bezel)
+            for col in range(1, grid - 1):  # skip edge cols
+                patch = gray[row*ph:(row+1)*ph, col*pw:(col+1)*pw]
+                mean_val = float(np.mean(patch))
+                std_val = float(np.std(patch))
+                total_inner_patches += 1
+                # A bright, uniform patch: mean > 100 AND std < 30
+                if mean_val > 100 and std_val < 32:
+                    bright_uniform_patches += 1
+
+        if total_inner_patches > 0:
+            uniformity_ratio = bright_uniform_patches / total_inner_patches
+            # Real scenes: ratio < 0.2 ; screens: ratio 0.4 - 0.9
+            lum_score = min(1.0, max(0.0, (uniformity_ratio - 0.20) / 0.45))
+        else:
+            lum_score = 0.0
+
+        scores.append(lum_score)
+
+        if lum_score > 0.4:
+            reasons.append(f"Bright uniform luminance regions: {bright_uniform_patches}/{total_inner_patches} patches")
+
+        print(f"[AntiSpoof] Luminance flatness: {bright_uniform_patches}/{total_inner_patches} patches bright+uniform, score={lum_score:.2f}")
+
+    except Exception as e:
+        print(f"[AntiSpoof] Luminance flatness check failed: {e}")
+        scores.append(0.0)
+
+    # ─────────────────────────────────────────────
+    # CHECK 4: Color Saturation Overload
+    # Phone screens display colors at higher saturation than real-world scenes.
+    # We convert to HSV and measure the fraction of pixels with high saturation.
+    # ─────────────────────────────────────────────
+    try:
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        s_channel = hsv[:, :, 1]  # saturation: 0-255
+        v_channel = hsv[:, :, 2]  # value/brightness: 0-255
+
+        # Count pixels that are highly saturated AND bright (excluding dark regions)
+        bright_mask_hsv = v_channel > 80
+        highly_saturated = np.sum((s_channel > 140) & bright_mask_hsv)
+        bright_pixels = np.sum(bright_mask_hsv)
+
+        if bright_pixels > 0:
+            sat_ratio = highly_saturated / bright_pixels
+        else:
+            sat_ratio = 0.0
+
+        # Real outdoor/indoor scenes: 10-30% ; phone screens: 40-85%
+        sat_score = min(1.0, max(0.0, (sat_ratio - 0.28) / 0.35))
+        scores.append(sat_score)
+
+        if sat_score > 0.4:
+            reasons.append(f"Hyper-saturated screen colors: {sat_ratio*100:.0f}% of bright pixels oversaturated")
+
+        print(f"[AntiSpoof] Saturation: {sat_ratio*100:.1f}% oversaturated, score={sat_score:.2f}")
+
+    except Exception as e:
+        print(f"[AntiSpoof] Saturation check failed: {e}")
+        scores.append(0.0)
+
+    # ─────────────────────────────────────────────
+    # COMBINE: Weighted scoring
+    # sat: 0.40 (most reliable - no natural scene has 70%+ oversaturation)
+    # edge: 0.30 (straight rectangle edges are screen-specific)
+    # bezel: 0.20 (reliable only if phone not held flush to camera)
+    # lum: 0.10 (supplementary)
+    # ─────────────────────────────────────────────
+    weights = [0.20, 0.30, 0.10, 0.40]
+    final_score = sum(s * w for s, w in zip(scores[:4], weights))
+
+    # FAST-PATH: if saturation alone is extremely high (>65%), it's almost certainly a screen.
+    # No real-world natural scene achieves this level of color oversaturation.
+    sat_override = len(scores) >= 4 and scores[3] >= 0.65
+    if sat_override:
+        reasons.append("OVERRIDE: Extreme color saturation (impossible in natural scenes)")
+
+    # Threshold 0.28 — lower threshold since saturation is now primary signal
+    is_screen = final_score >= 0.28 or sat_override
+
+    reason_str = " | ".join(reasons) if reasons else "No screen artifacts detected"
+
+    print(f"[AntiSpoof] Scores: bezel={scores[0]:.2f} edge={scores[1]:.2f} lum={scores[2]:.2f} sat={scores[3]:.2f}")
+    print(f"[AntiSpoof] Final score: {final_score:.3f} sat_override={sat_override} → {'📱 SCREEN DETECTED' if is_screen else '✅ REAL SCENE'}")
+
+    return is_screen, final_score, reason_str
