@@ -3,6 +3,7 @@ import UploadScreen from './components/UploadScreen';
 import ProcessingScreen from './components/ProcessingScreen';
 import SnakeDetectedScreen from './components/SnakeDetectedScreen';
 import AllClearScreen from './components/AllClearScreen';
+import SpoofWarningScreen from './components/SpoofWarningScreen';
 
 const LOCATIONS = {
     'block-a': { name: 'Block A - Main Entrance' },
@@ -28,6 +29,7 @@ export default function App() {
     const [snakeStatus, setSnakeStatus] = useState('VENOMOUS');
 
     const [imagePath, setImagePath] = useState('');
+    const [spoofReason, setSpoofReason] = useState('');
 
     const locationName = location ? LOCATIONS[location]?.name || location : '';
 
@@ -57,6 +59,18 @@ export default function App() {
 
             if (response.ok) {
                 const data = await response.json();
+
+                // Check for media spoofing first
+                if (data.status === 'Media Spoof Detected') {
+                    setSpoofReason(data.spoof_reason || 'Screen pixel pattern detected');
+                    setConfidence(data.confidence || 0);
+                    const now = new Date();
+                    setApiTimestamp(`${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')} ${now.getHours() >= 12 ? 'PM' : 'AM'}`);
+                    setIsReady(false);
+                    setScreen('spoof-detected');
+                    return;
+                }
+
                 resultConfidence = data.confidence || 0;
 
                 resultHasSnake = data.status && data.status.toUpperCase() !== 'NO SNAKE DETECTED';
@@ -89,9 +103,15 @@ export default function App() {
         setScreen(hasSnake ? 'snake-detected' : 'all-clear');
     }, [hasSnake]);
 
+    const handleLogTamper = () => {
+        const ts = new Date().toLocaleString();
+        alert(`⚠️ TAMPER INCIDENT LOGGED\n\nTime: ${ts}\nLocation: ${locationName}\nReason: ${spoofReason}\n\nWhatsApp tamper alert has already been sent to the secretary.`);
+    };
+
     const handleReset = () => {
         setFile(null);
         setLocation('');
+        setSpoofReason('');
         setScreen('upload');
     };
 
@@ -136,6 +156,16 @@ export default function App() {
                 <AllClearScreen
                     onReset={handleReset}
                     analysisTime={analysisTime}
+                />
+            )}
+            {screen === 'spoof-detected' && (
+                <SpoofWarningScreen
+                    onRetry={handleReset}
+                    onLogTamper={handleLogTamper}
+                    locationName={locationName}
+                    snakeConfidence={confidence}
+                    spoofReason={spoofReason}
+                    timestamp={apiTimestamp}
                 />
             )}
         </div>
