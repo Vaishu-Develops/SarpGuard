@@ -2,14 +2,18 @@
 
 @theme {
   --color-safe: #10B981;
-  --color-safe-light: #D1FAE5;
+  --color-safe-light: #6EE7B7;
   --color-safe-dark: #059669;
-  --color-danger: #EF4444;
-  --color-danger-light: #FEE2E2;
-  --color-danger-dark: #DC2626;
-  --color-processing: #3B82F6;
-  --color-processing-light: #DBEAFE;
-  --color-processing-dark: #2563EB;
+  --color-danger: #F43F5E;
+  --color-danger-light: #FDA4AF;
+  --color-danger-dark: #E11D48;
+  --color-processing: #38BDF8;
+  --color-processing-light: #7DD3FC;
+  --color-processing-dark: #0284C7;
+  --color-surface: #0B0F19;
+  --color-panel: #0F172A;
+
+  --font-mono: "Rajdhani", "Orbitron", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 @layer base {
@@ -19,7 +23,8 @@
   #root {
     height: 100%;
     width: 100%;
-    @apply bg-slate-50 text-slate-900 antialiased overflow-x-hidden;
+    @apply bg-surface text-slate-300 antialiased overflow-x-hidden;
+    font-family: var(--font-mono);
   }
 }
 
