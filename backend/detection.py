@@ -184,3 +184,58 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
             cv2.imwrite(output_image_path, frame)
         print("[Detection] No snake found in any sampled frame.")
         return False, 0.0, ""
+
+def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float]:
+    """
+    Processes a single live webcam frame encoded as base64.
+    Returns:
+        detected (bool): If a snake is found.
+        boxes (list): List of dicts with x, y, width, height, confidence for the frontend to draw.
+        frame (np.ndarray): The decoded OpenCV image array (for cropping/saving later if needed).
+        max_conf (float): The highest confidence score found.
+    """
+    import base64
+    
+    # Strip base64 prefix if present
+    if "base64," in base64_data:
+        base64_data = base64_data.split("base64,")[1]
+        
+    try:
+        # Decode base64 to OpenCV image
+        img_data = base64.b64decode(base64_data)
+        np_arr = np.frombuffer(img_data, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        
+        if frame is None:
+            print("[Live Detection] Failed to decode base64 frame.")
+            return False, [], None, 0.0
+            
+        # Run Roboflow Inference on the raw Numpy Array directly (inference-sdk supports this)
+        result = CLIENT.infer(frame, model_id=DETECTION_MODEL_ID)
+        predictions = result.get("predictions", [])
+        
+        if not predictions:
+            return False, [], frame, 0.0
+            
+        boxes = []
+        max_conf = 0.0
+        
+        for pred in predictions:
+            conf = pred["confidence"]
+            if conf > max_conf:
+                max_conf = conf
+                
+            boxes.append({
+                "x": pred["x"],
+                "y": pred["y"],
+                "width": pred["width"],
+                "height": pred["height"],
+                "confidence": conf
+            })
+            
+        return len(boxes) > 0, boxes, frame, max_conf
+        
+    except Exception as e:
+        print(f"[Live Detection] Error processing frame: {e}")
+        return False, [], None, 0.0
+
