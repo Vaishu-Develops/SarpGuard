@@ -15,19 +15,61 @@ CLIENT = InferenceHTTPClient(
     api_key=API_KEY
 )
 
+# Initialize YOLOv8 for device detection (Anti-Spoof Layer 0)
+from ultralytics import YOLO
+import threading
+
+# Model path: prefer backend/model/yolov8n.pt if available, else fall back to root
+_MODEL_PATH = os.path.join(os.path.dirname(__file__), "model", "yolov8n.pt")
+if not os.path.exists(_MODEL_PATH):
+    _MODEL_PATH = "yolov8n.pt"  # fallback: auto-download to cwd
+device_model = YOLO(_MODEL_PATH)
+print(f"[AntiSpoof] YOLOv8 loaded from: {_MODEL_PATH}")
+
+# COCO classes for screen/fake-source detection:
+# 62 = tv, 63 = laptop, 67 = cell phone, 73 = book (could hold printed snake photo)
+DEVICE_CLASSES = [62, 63, 67, 73]
+DEVICE_CLASS_NAMES = {62: "TV", 63: "Laptop", 67: "Phone", 73: "Book/Print"}
+
 # Initialize ByteTrack for snake tracking across frames
 byte_tracker = sv.ByteTrack()
 
-def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, max_samples: int = 20) -> tuple[bool, float, str]:
+def check_bbox_overlap(boxA, boxB):
+    """
+    Check if boxA (snake) is significantly covered by or overlaps with boxB (device).
+    Returns True if there is a significant intersection.
+    boxes format: [x1, y1, x2, y2]
+    """
+    xA = max(boxA[0], boxB[0])
+    yA = max(boxA[1], boxB[1])
+    xB = min(boxA[2], boxB[2])
+    yB = min(boxA[3], boxB[3])
+
+    interArea = max(0, xB - xA) * max(0, yB - yA)
+    if interArea == 0:
+        return False
+
+    boxAArea = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1])
+    # If the intersection covers at least 30% of the snake, consider it overlapping
+    return (interArea / float(boxAArea)) > 0.3
+
+def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, max_samples: int = 20) -> tuple[bool, float, str, bool, str]:
     """
     Samples multiple frames from the video, runs Roboflow snake-detection/2 detection,
-    uses ByteTrack to track snake movement across frames,
-    saves annotated frame with tracking info, and returns (detected, confidence, crop_path).
+    uses ByteTrack to track snake movement across frames.
+    In parallel, runs Anti-Spoof Layer 0 (device object detection + screen artifacts).
+    
+    Returns:
+        detected (bool): If a snake is found
+        confidence (float): Confidence of the snake detection
+        crop_path (str): Path to the cropped snake image
+        is_spoof (bool): True if a screen device or screen artifact was found overlapping/during the snake detection
+        spoof_reason (str): Reason for the spoof classification
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print("[Detection] Could not open video.")
-        return False, 0.0, ""
+        return False, 0.0, "", False, ""
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS) or 25
@@ -53,8 +95,13 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
     best_prediction = None
     best_frame = None
     tracked_detections = None  # Store tracking data for the best frame
+    
+    # Anti-spoof tracking variables
+    best_spoof_score = 0.0
+    is_spoof_detected = False
+    final_spoof_reasons = []
 
-    print(f"[Detection] Sampling {len(frame_indices)} frames from video with ByteTrack")
+    print(f"[Detection] Sampling {len(frame_indices)} frames from video with ByteTrack + AntiSpoof")
 
     # Reset tracker for new video
     byte_tracker.reset()
@@ -68,10 +115,44 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
         cv2.imwrite(temp_image_path, frame)
         h, w = frame.shape[:2]
 
+        # Initialize parallel outputs
+        spoof_artifact_result = [False, 0.0, ""]
+        spoof_device_boxes = []
+
+        # 1. Run Screen Artifact detection thread
+        def run_artifact_check():
+            spoof_artifact_result[0], spoof_artifact_result[1], spoof_artifact_result[2] = detect_screen_artifact(frame)
+
+        # 2. Run Device Object Detection thread
+        def run_device_check():
+            results = device_model.predict(frame, classes=DEVICE_CLASSES, verbose=False)
+            for box in results[0].boxes:
+                # [x1, y1, x2, y2]
+                xyxy = box.xyxy[0].cpu().numpy()
+                cls = int(box.cls[0].cpu().item())
+                conf = box.conf[0].cpu().item()
+                if conf > 0.4: # Only consider reasonably confident device detections
+                    spoof_device_boxes.append({"box": xyxy, "cls": cls, "conf": conf})
+
+        # Start background threads for anti-spoof checks
+        thread_artifacts = threading.Thread(target=run_artifact_check)
+        thread_devices = threading.Thread(target=run_device_check)
+        thread_artifacts.start()
+        thread_devices.start()
+
+        # In parallel, main thread runs snake detection
         try:
             result = CLIENT.infer(temp_image_path, model_id=DETECTION_MODEL_ID)
             predictions = result.get("predictions", [])
             print(f"[Detection] Frame {idx}: {len(predictions)} predictions found")
+
+            # Wait for anti-spoof checks to finish before evaluating the frame's results
+            thread_artifacts.join()
+            thread_devices.join()
+
+            has_snake = False
+            top_snake_pred = None
+            snake_xyxy = None
 
             if predictions:
                 # Convert Roboflow predictions to supervision Detections format
@@ -106,14 +187,48 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
                     conf = top["confidence"]
                     print(f"[Detection] Frame {idx}: snake found with {conf*100:.1f}% confidence")
 
+                    x, y = top["x"], top["y"]
+                    box_w, box_h = top["width"], top["height"]
+                    snake_xyxy = [x - box_w / 2, y - box_h / 2, x + box_w / 2, y + box_h / 2]
+
                     if conf > best_confidence:
                         best_confidence = conf
                         best_prediction = top
                         best_frame = frame.copy()
                         tracked_detections = detections  # Save tracking data for best frame
+                        
+                    has_snake = True
+                    top_snake_pred = top
 
             else:
                 print(f"[Detection] Frame {idx}: no snake detected")
+
+            # --- Anti-Spoof Logic Evaluation for this frame ---
+            # We only care about spoofing if a snake is potentially present
+            if has_snake:
+                frame_is_spoof = False
+                frame_spoof_reasons = []
+
+                # Check 1: Artifacts
+                art_is_spoof, art_score, art_reason = spoof_artifact_result
+                if art_is_spoof:
+                    frame_is_spoof = True
+                    frame_spoof_reasons.append(art_reason)
+
+                # Check 2: Devices overlapping snake
+                for device in spoof_device_boxes:
+                    if check_bbox_overlap(snake_xyxy, device["box"]):
+                        frame_is_spoof = True
+                        cls_name = device_model.names[device["cls"]]
+                        frame_spoof_reasons.append(f"Snake overlaps with detected '{cls_name}' display (conf: {device['conf']:.2f})")
+
+                # Accumulate spoof reasoning across the video
+                if frame_is_spoof:
+                    is_spoof_detected = True
+                    for r in frame_spoof_reasons:
+                        if r not in final_spoof_reasons:
+                            final_spoof_reasons.append(r)
+
         except Exception as e:
             print(f"[Detection] Frame {idx} error: {e}")
             continue
@@ -123,6 +238,8 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
     # Cleanup temp raw image
     if os.path.exists(temp_image_path):
         os.remove(temp_image_path)
+
+    final_spoof_reason_str = " | ".join(final_spoof_reasons) if final_spoof_reasons else ""
 
     if best_prediction is not None and best_frame is not None:
         # ─── EXTRACT CROP BEFORE ANNOTATING ───
@@ -172,8 +289,8 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
             cv2.putText(best_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
         cv2.imwrite(output_image_path, best_frame)
-        print(f"[Detection] Best detection: {best_confidence*100:.1f}% confidence | Annotated with supervision")
-        return True, best_confidence, final_crop_path
+        print(f"[Detection] Best detection: {best_confidence*100:.1f}% confidence | Spoof: {is_spoof_detected}")
+        return True, best_confidence, final_crop_path, is_spoof_detected, final_spoof_reason_str
     else:
         # No snake detected in any frame — save the middle frame as fallback
         cap = cv2.VideoCapture(video_path)
@@ -183,16 +300,21 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
         if ret:
             cv2.imwrite(output_image_path, frame)
         print("[Detection] No snake found in any sampled frame.")
-        return False, 0.0, ""
+        return False, 0.0, "", False, ""
 
-def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float]:
+def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float, list, bool, str]:
     """
     Processes a single live webcam frame encoded as base64.
+    Runs snake detection (Roboflow) + device detection (YOLOv8) + static tracker in parallel.
+    
     Returns:
-        detected (bool): If a snake is found.
-        boxes (list): List of dicts with x, y, width, height, confidence for the frontend to draw.
-        frame (np.ndarray): The decoded OpenCV image array (for cropping/saving later if needed).
-        max_conf (float): The highest confidence score found.
+        detected (bool): Snake found
+        boxes (list): Snake bounding boxes for drawing
+        frame (np.ndarray): The decoded frame
+        max_conf (float): Highest snake confidence
+        device_boxes (list): Device/spoof bounding boxes for drawing
+        spoof_detected (bool): True if snake overlaps a device or artifact
+        spoof_reason (str): Reason string
     """
     import base64
     
@@ -208,36 +330,97 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float]
         
         if frame is None:
             print("[Live Detection] Failed to decode base64 frame.")
-            return False, [], None, 0.0
-            
-        # Run Roboflow Inference on the raw Numpy Array directly (inference-sdk supports this)
-        result = CLIENT.infer(frame, model_id=DETECTION_MODEL_ID)
-        predictions = result.get("predictions", [])
-        
-        if not predictions:
-            return False, [], frame, 0.0
-            
-        boxes = []
-        max_conf = 0.0
-        
-        for pred in predictions:
-            conf = pred["confidence"]
-            if conf > max_conf:
-                max_conf = conf
-                
-            boxes.append({
-                "x": pred["x"],
-                "y": pred["y"],
-                "width": pred["width"],
-                "height": pred["height"],
-                "confidence": conf
-            })
-            
-        return len(boxes) > 0, boxes, frame, max_conf
+            return False, [], None, 0.0, [], False, ""
+
+        # --- Parallel processing ---
+        snake_result = [False, [], 0.0]  # [detected, boxes, max_conf]
+        device_result = []               # list of device box dicts
+        artifact_result = [False, 0.0, ""]
+
+        def run_snake_detection():
+            try:
+                result = CLIENT.infer(frame, model_id=DETECTION_MODEL_ID)
+                predictions = result.get("predictions", [])
+                max_conf = 0.0
+                boxes = []
+                for pred in predictions:
+                    conf = pred["confidence"]
+                    if conf > max_conf:
+                        max_conf = conf
+                    boxes.append({
+                        "x": pred["x"],
+                        "y": pred["y"],
+                        "width": pred["width"],
+                        "height": pred["height"],
+                        "confidence": conf,
+                        "type": "snake"
+                    })
+                snake_result[0] = len(boxes) > 0
+                snake_result[1] = boxes
+                snake_result[2] = max_conf
+            except Exception as e:
+                print(f"[Live Detection] Snake detection error: {e}")
+
+        def run_device_detection():
+            try:
+                results = device_model.predict(frame, classes=DEVICE_CLASSES, verbose=False)
+                for box in results[0].boxes:
+                    xyxy = box.xyxy[0].cpu().numpy().tolist()
+                    cls = int(box.cls[0].cpu().item())
+                    conf = float(box.conf[0].cpu().item())
+                    if conf > 0.35:
+                        label = DEVICE_CLASS_NAMES.get(cls, f"Device({cls})")
+                        device_result.append({
+                            "x1": xyxy[0], "y1": xyxy[1],
+                            "x2": xyxy[2], "y2": xyxy[3],
+                            "confidence": conf,
+                            "label": label,
+                            "type": "device"
+                        })
+            except Exception as e:
+                print(f"[Live Detection] Device detection error: {e}")
+
+        def run_artifact_detection():
+            artifact_result[0], artifact_result[1], artifact_result[2] = detect_screen_artifact(frame)
+
+        t1 = threading.Thread(target=run_snake_detection)
+        t2 = threading.Thread(target=run_device_detection)
+        t3 = threading.Thread(target=run_artifact_detection)
+        t1.start(); t2.start(); t3.start()
+        t1.join(); t2.join(); t3.join()
+
+        detected, snake_boxes, max_conf = snake_result
+        is_artifact, art_score, art_reason = artifact_result
+
+        # Correlate: does any snake box overlap a device box?
+        spoof_detected = False
+        spoof_reasons = []
+
+        if detected and is_artifact:
+            spoof_detected = True
+            spoof_reasons.append(art_reason)
+
+        if detected:
+            for sbox in snake_boxes:
+                sx1 = sbox["x"] - sbox["width"] / 2
+                sy1 = sbox["y"] - sbox["height"] / 2
+                sx2 = sbox["x"] + sbox["width"] / 2
+                sy2 = sbox["y"] + sbox["height"] / 2
+                snake_xyxy = [sx1, sy1, sx2, sy2]
+
+                for dbox in device_result:
+                    d_xyxy = [dbox["x1"], dbox["y1"], dbox["x2"], dbox["y2"]]
+                    if check_bbox_overlap(snake_xyxy, d_xyxy):
+                        spoof_detected = True
+                        spoof_reasons.append(f"Snake overlaps '{dbox['label']}'")
+
+        spoof_reason_str = " | ".join(spoof_reasons) if spoof_reasons else ""
+        print(f"[Live Detection] snake={detected} conf={max_conf:.2f} devices={len(device_result)} spoof={spoof_detected}")
+        return detected, snake_boxes, frame, max_conf, device_result, spoof_detected, spoof_reason_str
         
     except Exception as e:
         print(f"[Live Detection] Error processing frame: {e}")
-        return False, [], None, 0.0
+        return False, [], None, 0.0, [], False, ""
 
 
 def detect_screen_artifact(frame: np.ndarray) -> tuple[bool, float, str]:
