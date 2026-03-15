@@ -24,6 +24,11 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
     const [recordingTime, setRecordingTime] = useState(0);
     const [isLiveDetecting, setIsLiveDetecting] = useState(false);
     const [liveDetections, setLiveDetections] = useState([]);
+    const [liveDeviceBoxes, setLiveDeviceBoxes] = useState([]);
+    const [liveSpoofAlert, setLiveSpoofAlert] = useState(null); // null | { detected: bool, reason: string }
+    // Static snake tracking: track frames where a snake was found but didn't move
+    const snakePositionHistoryRef = useRef([]);
+    const [staticWarning, setStaticWarning] = useState(false);
 
     const handleFileSelect = (e) => {
         const selected = e.target.files?.[0];
@@ -94,11 +99,48 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
         }
     }, [capturing, recordingTime]);
 
-    // Real-Time Detection Loop
+    // LOOP 1: Fast device-only detection (400ms) — draws phone/TV/book boxes instantly
+    useEffect(() => {
+        if (!isLiveDetecting || !isCameraActive || hasTriggeredRef.current) {
+            setLiveDeviceBoxes([]);
+            setLiveSpoofAlert(null);
+            return;
+        }
+
+        const detectDevice = async () => {
+            if (!webcamRef.current) return;
+            const imageSrc = webcamRef.current.getScreenshot();
+            if (!imageSrc) return;
+            try {
+                const res = await fetch("http://localhost:8000/detect-device", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ frame: imageSrc })
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    setLiveDeviceBoxes(data.device_boxes || []);
+                    if (data.is_screen) {
+                        setLiveSpoofAlert({ detected: true, reason: data.reason || 'Screen/device detected' });
+                    } else {
+                        setLiveSpoofAlert(null);
+                    }
+                }
+            } catch (err) {
+                console.error("Device detection error:", err);
+            }
+        };
+
+        detectDevice(); // run immediately on enable
+        const deviceInterval = setInterval(detectDevice, 400);
+        return () => clearInterval(deviceInterval);
+    }, [isLiveDetecting, isCameraActive]);
+
+    // LOOP 2: Slower snake detection via Roboflow (2.5s) — auto-triggers on real snake
     useEffect(() => {
         let intervalId;
 
-        const detectLiveFrame = async () => {
+        const detectSnake = async () => {
             if (!webcamRef.current || !isLiveDetecting) return;
 
             const imageSrc = webcamRef.current.getScreenshot();
@@ -113,50 +155,64 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
 
                 if (response.ok) {
                     const data = await response.json();
-                    setLiveDetections(data.boxes || []);
+                    const snakeBoxes = data.boxes || [];
 
-                    // AUTO-TRIGGER LOGIC
-                    if (data.detected && data.boxes && data.boxes.length > 0 && location && !hasTriggeredRef.current) {
-                        // Check if at least one box has decent confidence from the fast model
-                        const validThreat = data.boxes.some(b => b.confidence > 0.40);
+                    setLiveDetections(snakeBoxes);
+
+                    // Merge fresh device boxes from slow response too (in case fast poll missed)
+                    if (data.device_boxes && data.device_boxes.length > 0) {
+                        setLiveDeviceBoxes(prev => data.device_boxes.length > prev.length ? data.device_boxes : prev);
+                    }
+
+                    // Static snake detection
+                    if (data.detected && snakeBoxes.length > 0) {
+                        const centroid = { x: snakeBoxes[0].x, y: snakeBoxes[0].y };
+                        snakePositionHistoryRef.current.push(centroid);
+                        if (snakePositionHistoryRef.current.length > 5) snakePositionHistoryRef.current.shift();
+                        if (snakePositionHistoryRef.current.length === 5) {
+                            const xs = snakePositionHistoryRef.current.map(p => p.x);
+                            const ys = snakePositionHistoryRef.current.map(p => p.y);
+                            setStaticWarning(Math.max(...xs) - Math.min(...xs) < 10 && Math.max(...ys) - Math.min(...ys) < 10);
+                        }
+                    } else {
+                        snakePositionHistoryRef.current = [];
+                        setStaticWarning(false);
+                    }
+
+                    // AUTO-TRIGGER: only if snake found AND NOT a spoof
+                    if (data.detected && snakeBoxes.length > 0 && !data.spoof_detected && location && !hasTriggeredRef.current) {
+                        const validThreat = snakeBoxes.some(b => b.confidence > 0.40);
                         if (validThreat) {
                             hasTriggeredRef.current = true;
                             setIsLiveDetecting(false);
-
-                            // Convert base64 dataURI to Blob cleanly using fetch
                             const fetchRes = await fetch(imageSrc);
                             const blob = await fetchRes.blob();
-
-                            // Create File matching API format
                             const frameFile = new File([blob], `live_threat_${Date.now()}.jpg`, { type: 'image/jpeg' });
                             setFile(frameFile);
-
-                            // Immediately process this file directly bypassing closure state
                             onAnalyze(frameFile);
                         }
                     }
                 }
             } catch (err) {
-                console.error("Live detection error:", err);
+                console.error("Snake detection error:", err);
             }
         };
 
         if (isLiveDetecting && isCameraActive && !hasTriggeredRef.current) {
-            intervalId = setInterval(detectLiveFrame, 1000); // Check every 1 second
+            intervalId = setInterval(detectSnake, 2500); // slower — Roboflow cloud call
         } else {
-            setLiveDetections([]); // Clear boxes if turned off
+            setLiveDetections([]);
+            setStaticWarning(false);
             if (canvasRef.current) {
                 const ctx = canvasRef.current.getContext('2d');
                 ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
             }
         }
 
-        return () => {
-            if (intervalId) clearInterval(intervalId);
-        };
+        return () => { if (intervalId) clearInterval(intervalId); };
     }, [isLiveDetecting, isCameraActive]);
 
-    // Draw bounding boxes when liveDetections state changes
+    // Draw bounding boxes when detection state changes
     useEffect(() => {
         if (!canvasRef.current || !webcamRef.current || !webcamRef.current.video) return;
 
@@ -164,39 +220,54 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
 
-        // Use the EXACT natural resolution of the video for the drawing canvas
-        // Adding the CSS `object-cover` class will force the browser to scale/crop both canvas and video identically
         const videoWidth = video.videoWidth;
         const videoHeight = video.videoHeight;
-
         canvas.width = videoWidth;
         canvas.height = videoHeight;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        if (liveDetections.length === 0) return;
-
+        // --- Draw SNAKE boxes (red, center-based coords)
         liveDetections.forEach(box => {
-            // Convert center (x,y) to top-left corner using raw image dimensions from Roboflow
             const w = box.width;
             const h = box.height;
             const x = box.x - (w / 2);
             const y = box.y - (h / 2);
 
-            // Draw glowing box
-            ctx.strokeStyle = '#F43F5E'; // Cyber Rose
+            ctx.strokeStyle = '#F43F5E'; // Red
             ctx.lineWidth = 3;
             ctx.shadowColor = '#F43F5E';
             ctx.shadowBlur = 10;
             ctx.strokeRect(x, y, w, h);
 
-            // Draw label
             ctx.fillStyle = '#F43F5E';
             ctx.shadowBlur = 0;
-            ctx.font = '12px "Rajdhani", monospace';
-            ctx.fillText(`THREAT ${(box.confidence * 100).toFixed(1)}%`, x, y - 5);
+            ctx.font = 'bold 13px monospace';
+            ctx.fillText(`🐍 SNAKE ${(box.confidence * 100).toFixed(1)}%`, x + 4, y - 6);
         });
 
-    }, [liveDetections]);
+        // --- Draw DEVICE / SPOOF boxes (amber, absolute xyxy coords from YOLO)
+        liveDeviceBoxes.forEach(box => {
+            const x = box.x1;
+            const y = box.y1;
+            const w = box.x2 - box.x1;
+            const h = box.y2 - box.y1;
+
+            ctx.strokeStyle = '#F59E0B'; // Amber / orange
+            ctx.lineWidth = 3;
+            ctx.shadowColor = '#F59E0B';
+            ctx.shadowBlur = 12;
+            ctx.strokeRect(x, y, w, h);
+
+            // Fill label background
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = 'rgba(245,158,11,0.85)';
+            ctx.fillRect(x, y - 22, ctx.measureText(`⚠ ${box.label} ${(box.confidence * 100).toFixed(0)}%`).width + 12, 20);
+            ctx.fillStyle = '#000';
+            ctx.font = 'bold 12px monospace';
+            ctx.fillText(`⚠ ${box.label} ${(box.confidence * 100).toFixed(0)}%`, x + 4, y - 7);
+        });
+
+    }, [liveDetections, liveDeviceBoxes]);
 
     return (
         <div className="w-full h-full min-h-screen p-4 md:p-8 flex flex-col justify-center items-center relative z-10">
@@ -309,6 +380,18 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
                                             <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-processing"></div>
                                             <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-processing"></div>
                                         </div>
+
+                                        {/* Spoof warning banner */}
+                                        {liveSpoofAlert?.detected && (
+                                            <div className="absolute top-4 right-4 left-4 z-30 bg-yellow-500/90 border border-yellow-300 text-black font-bold text-xs font-mono px-3 py-2 flex items-center gap-2 animate-pulse shadow-lg">
+                                                ⚠ PHONE/SCREEN DETECTED — {liveSpoofAlert.reason}
+                                            </div>
+                                        )}
+                                        {staticWarning && !liveSpoofAlert?.detected && (
+                                            <div className="absolute top-4 right-4 left-4 z-30 bg-orange-400/90 border border-orange-300 text-black font-bold text-xs font-mono px-3 py-2 flex items-center gap-2 shadow-lg">
+                                                ⏸ STATIC OBJECT — Snake not moving, verify manually
+                                            </div>
+                                        )}
 
                                         <div className="absolute top-4 left-4 text-processing font-mono text-[10px] tracking-widest flex items-center gap-2">
                                             <div className="w-2 h-2 rounded-full bg-processing animate-pulse"></div>
