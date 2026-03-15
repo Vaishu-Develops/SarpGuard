@@ -7,6 +7,10 @@ import uvicorn
 import sys
 from pathlib import Path
 
+# Force unbuffered output so all print() logs appear immediately in terminal
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
 # Add parent directory to path so imports work
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -72,43 +76,11 @@ async def detect(background_tasks: BackgroundTasks, file: UploadFile = File(...)
         import cv2 as _cv2
         import numpy as _np
         
-        # === LAYER 0: Anti-Spoofing Screen Detection ===
-        # Check if the input is a photo/video of a phone/monitor screen before running detection
-        try:
-            if ext.lower() in [".jpg", ".jpeg", ".png"]:
-                # For images, decode directly
-                raw = open(video_filename, "rb").read()
-                np_arr = _np.frombuffer(raw, _np.uint8)
-                spoof_frame = _cv2.imdecode(np_arr, _cv2.IMREAD_COLOR)
-            else:
-                # For video, grab just the first frame
-                cap_spoof = _cv2.VideoCapture(video_filename)
-                ret, spoof_frame = cap_spoof.read()
-                cap_spoof.release()
-                if not ret:
-                    spoof_frame = None
-            
-            if spoof_frame is not None:
-                is_spoof, spoof_conf, spoof_reason = detect_screen_artifact(spoof_frame)
-                print(f"[Layer 0 AntiSpoof] is_screen={is_spoof}, score={spoof_conf:.2f}, reason={spoof_reason}")
-                
-                if is_spoof:
-                    # Block the alert, send tamper notification instead
-                    send_tamper_alert(location, spoof_conf, spoof_reason)
-                    return {
-                        "status": "Media Spoof Detected",
-                        "confidence": spoof_conf * 100,
-                        "image_path": "",
-                        "alert_sent": False,
-                        "spoof_reason": spoof_reason,
-                        "timestamp": readable_timestamp
-                    }
-        except Exception as spoof_err:
-            # Don't crash; if anti-spoof check fails, proceed with normal detection
-            print(f"[Layer 0 AntiSpoof] ⚠️ Check failed, skipping: {spoof_err}")
+        # The old Layer 0 early Return was removed here
+        # Spoof checks are now parallelized inside detect_snake to correlate with the snake bounding box
         
         # === LAYER 1+: Normal Detection Pipeline ===
-        detected, yolo_conf, actual_crop_path = detect_snake(video_filename, image_filename, crop_filename)
+        detected, yolo_conf, actual_crop_path, is_spoof, spoof_reason = detect_snake(video_filename, image_filename, crop_filename)
         
         status = "Harmless"
         confidence = 0.0
@@ -125,8 +97,14 @@ async def detect(background_tasks: BackgroundTasks, file: UploadFile = File(...)
                 print(f"[Main] Rejected detection as false positive. Classifier confidence too low: {confidence:.1f}%")
                 return {"status": "No Snake Detected", "confidence": 0.0, "image_path": "", "alert_sent": False, "timestamp": readable_timestamp}
             
-            # 3. Alert
-            alert_sent = send_whatsapp_alert(location, confidence, status)
+            # 3. Alert or Spoof Block
+            if is_spoof:
+                print(f"[Main] 🛑 Spoof detected during snake detection. Reason: {spoof_reason}")
+                send_tamper_alert(location, confidence, spoof_reason)
+                status = "PHONE / SCREEN VIDEO DETECTED"
+                alert_sent = False
+            else:
+                alert_sent = send_whatsapp_alert(location, confidence, status)
                 
             # 4. Save history
             record = {
@@ -159,17 +137,83 @@ async def detect(background_tasks: BackgroundTasks, file: UploadFile = File(...)
 @app.post("/detect-live")
 async def detect_live(data: LiveFrame):
     """
-    Very fast endpoint for real-time live webcam streaming.
-    Accepts a base64 encoded frame, returns bounding box coordinates.
-    Does NOT save to History database automatically to prevent 
-    spamming the system with records during live view.
+    Real-time live webcam streaming endpoint.
+    Accepts a base64 encoded frame.
+    Returns snake boxes, device boxes, spoof state.
+    NOTE: This includes Roboflow cloud call (~2-3s latency).
+    For instant device boxes, use /detect-device instead.
     """
-    detected, boxes, frame, _ = detect_snake_frame(data.frame)
+    detected, boxes, frame, max_conf, device_boxes, spoof_detected, spoof_reason = detect_snake_frame(data.frame)
     
     return {
         "detected": detected,
-        "boxes": boxes
+        "boxes": boxes,
+        "device_boxes": device_boxes,
+        "spoof_detected": spoof_detected,
+        "spoof_reason": spoof_reason,
+        "confidence": round(max_conf * 100, 1)
     }
+
+@app.post("/detect-device")
+async def detect_device(data: LiveFrame):
+    """
+    FAST device-only detection endpoint (~200ms).
+    Runs ONLY YOLOv8 (phone/TV/laptop/book) + screen artifact checks.
+    NO Roboflow call — designed for frequent polling to draw device boxes instantly.
+    """
+    import base64, threading
+    import cv2, numpy as np
+    from backend.detection import device_model, DEVICE_CLASSES, DEVICE_CLASS_NAMES, detect_screen_artifact
+
+    frame_data = data.frame
+    if "base64," in frame_data:
+        frame_data = frame_data.split("base64,")[1]
+
+    try:
+        img_data = base64.b64decode(frame_data)
+        np_arr = np.frombuffer(img_data, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return {"device_boxes": [], "is_screen": False, "reason": ""}
+
+        device_boxes = []
+        artifact_result = [False, 0.0, ""]
+
+        def run_device():
+            results = device_model.predict(frame, classes=DEVICE_CLASSES, verbose=False)
+            for box in results[0].boxes:
+                xyxy = box.xyxy[0].cpu().numpy().tolist()
+                cls = int(box.cls[0].cpu().item())
+                conf = float(box.conf[0].cpu().item())
+                if conf > 0.25:  # Lower threshold for faster detection
+                    label = DEVICE_CLASS_NAMES.get(cls, f"Device({cls})")
+                    device_boxes.append({
+                        "x1": xyxy[0], "y1": xyxy[1],
+                        "x2": xyxy[2], "y2": xyxy[3],
+                        "confidence": conf,
+                        "label": label
+                    })
+
+        def run_artifact():
+            artifact_result[0], artifact_result[1], artifact_result[2] = detect_screen_artifact(frame)
+
+        t1 = threading.Thread(target=run_device)
+        t2 = threading.Thread(target=run_artifact)
+        t1.start(); t2.start()
+        t1.join(); t2.join()
+
+        is_screen, score, reason = artifact_result
+        print(f"[DeviceDetect] devices={len(device_boxes)} is_screen={is_screen} score={score:.2f}", flush=True)
+
+        return {
+            "device_boxes": device_boxes,
+            "is_screen": is_screen or len(device_boxes) > 0,
+            "reason": reason if is_screen else (f"Detected: {', '.join(b['label'] for b in device_boxes)}" if device_boxes else "")
+        }
+
+    except Exception as e:
+        print(f"[DeviceDetect] Error: {e}", flush=True)
+        return {"device_boxes": [], "is_screen": False, "reason": ""}
 
 @app.get("/history", response_model=List[DetectionRecord])
 def history():
