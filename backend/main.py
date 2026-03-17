@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 
 # Force unbuffered output so all print() logs appear immediately in terminal
-sys.stdout.reconfigure(line_buffering=True)
-sys.stderr.reconfigure(line_buffering=True)
+sys.stdout.reconfigure(line_buffering=True)  # type: ignore
+sys.stderr.reconfigure(line_buffering=True)  # type: ignore
 
 # Add parent directory to path so imports work
 sys.path.insert(0, str(Path(__file__).parent.parent))
