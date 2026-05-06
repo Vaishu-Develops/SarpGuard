@@ -169,7 +169,7 @@ async def detect_device(data: LiveFrame):
     """
     import base64, threading
     import cv2, numpy as np
-    from backend.detection import device_model, DEVICE_CLASSES, DEVICE_CLASS_NAMES, detect_screen_artifact
+    from backend.detection import get_device_model, DEVICE_CLASSES, DEVICE_CLASS_NAMES, detect_screen_artifact
 
     frame_data = data.frame
     if "base64," in frame_data:
@@ -186,7 +186,7 @@ async def detect_device(data: LiveFrame):
         artifact_result = [False, 0.0, ""]
 
         def run_device():
-            results = device_model.predict(frame, classes=DEVICE_CLASSES, verbose=False)
+            results = get_device_model().predict(frame, classes=DEVICE_CLASSES, verbose=False)
             for box in results[0].boxes:
                 xyxy = box.xyxy[0].cpu().numpy().tolist()
                 cls = int(box.cls[0].cpu().item())
