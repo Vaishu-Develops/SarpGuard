@@ -1,135 +1,221 @@
+<img src="https://capsule-render.vercel.app/api?type=waving&color=FF4500&height=220&section=header&text=SarpGuard%20%F0%9F%90%8D&fontSize=56&fontColor=ffffff&animation=fadeIn&fontAlignY=38&desc=AI%20Snake%20Detection%20%26%20Venom%20Classification&descAlignY=58&descSize=22&descColor=ffffff" width="100%" />
+
 <div align="center">
 
-# 🐍 SarpGuard | Intelligent Snake Detection System
-
 <p align="center">
-  <img src="https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge&logo=github" alt="Status" />
-  <img src="https://img.shields.io/badge/Python-3.11+-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python Version" />
-  <img src="https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React" />
-  <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/YOLO-v8-FF9800?style=for-the-badge&logo=opencv&logoColor=white" alt="YOLOv8" />
-  <img src="https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" />
+  <img src="https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge&logo=github" />
+  <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" />
+  <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" />
+  <img src="https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" />
+  <img src="https://img.shields.io/badge/Roboflow-purple?style=for-the-badge&logo=roboflow&logoColor=white" />
+  <img src="https://img.shields.io/badge/Twilio-F22F46?style=for-the-badge&logo=twilio&logoColor=white" />
 </p>
 
-### 🌌 Next-Gen Real-Time Vision for Safety
+<p align="center">
+  <b>AI-powered snake detection, venom classification & real-time WhatsApp alerts for residential safety.</b>
+</p>
 
-An AI-powered, dual-layer security system designed to detect, classify, and alert you about snakes in real-time. Whether via uploaded video footage or a live webcam feed, SarpGuard guarantees safety with futuristic accuracy.
-
-[Features](#-core-features) • [Architecture](#%EF%B8%8F-system-architecture) • [Quick Start](#-quick-start) • [Tech Stack](#-tech-stack)
+[Features](#-features) • [Architecture](#-architecture) • [Quick Start](#-quick-start) • [API](#-api-endpoints) • [Tech Stack](#-tech-stack)
 
 </div>
 
 ---
 
-## ✨ Core Features
+## 🔍 How It Works
 
-SarpGuard boasts bleeding-edge technology tailored for absolute reliability:
-
-*   🎥 **Dual Analysis Modes**: Supports both pre-recorded video uploads (via chunk processing) and real-time webcam streams.
-*   🧠 **Two-Stage AI Vision Pipeline**: 
-    1.  **Detection (YOLOv8)**: Rapidly sweeps the frame to identify the exact Region of Interest (ROI) where a snake might be.
-    2.  **Classification (Roboflow)**: A deep-learning pass strictly analyzes the ROI crop to classify the snake's species and verify confidence, heavily reducing false positives.
-*   ⚡ **Lightning-Fast Live Feed**: Zero-database latency mapping for real-time bounding box drawing over your camera.
-*   📱 **Smart Automated Alerts**: Instant WhatsApp notifications powered by Twilio, dispatching location, time, and AI confidence percent directly to your phone.
-*   📊 **Historical Dashboard**: Retains detection history logic to transparently review historical breaches.
-*   🎨 **Sleek UI/UX**: Built with React and Tailwind CSS for a dark-mode-first, futuristic "cyber-security" aesthetic with smooth micro-animations.
+```
+📹 Upload Video
+      │
+      ▼
+┌─────────────────────────────────────────────┐
+│  STAGE 1: DETECTION                         │
+│  Model: snake-detection/2 (10K images)      │
+│  Samples 20 frames across the video         │
+│  ByteTrack algorithm tracks snake movement  │
+│  Picks highest-confidence frame             │
+└──────────────────┬──────────────────────────┘
+                   │ Snake found? ✅
+                   ▼
+┌─────────────────────────────────────────────┐
+│  STAGE 2: CLASSIFICATION                    │
+│  Model: snake-venom/1                       │
+│  Classifies: VENOMOUS / NON VENOMOUS        │
+│  Returns confidence score (0–100%)          │
+└──────────────────┬──────────────────────────┘
+                   │ VENOMOUS? 🚨
+                   ▼
+┌─────────────────────────────────────────────┐
+│  STAGE 3: ALERT                             │
+│  Sends WhatsApp message via Twilio          │
+│  📱 Location + Confidence → Your Phone     │
+└─────────────────────────────────────────────┘
+                   │
+                   ▼
+          📊 Saved to History
+```
 
 ---
 
-## 🛠️ System Architecture
+## ✨ Features
 
-Our tech stack leverages the best of modern toolchains for both raw speed and elegant interfaces:
+| Feature | Description |
+|--------|-------------|
+| 🎥 **Multi-Frame Detection** | Samples 20 frames evenly across the video — never misses a snake |
+| 🧠 **Two-Stage AI Pipeline** | Detection → Classification, reducing false positives |
+| 🔷 **ByteTrack Tracking** | Supervision ByteTrack algorithm tracks snake movement across frames |
+| 📱 **Live WhatsApp Alerts** | Instant Twilio-powered alerts with location & confidence |
+| 🖼️ **Annotated Output** | Saves bounding-box-annotated image for every detection |
+| 📊 **Detection History** | Full log of all past detections with images |
+| 🌐 **REST API** | FastAPI backend with CORS support for easy integration |
+| 🎛️ **Streamlit Dashboard** | Clean web UI for uploads, results and history |
 
-### Backend (The Brains 🧠)
-*   **Framework**: FastAPI (Python) - *Asynchronous, incredibly fast REST endpoints.*
-*   **Computer Vision**: Ultralytics YOLOv8 & OpenCV.
-*   **Classifier API**: Roboflow Inference API integration.
-*   **Alert Generation**: Twilio Communications Client.
-*   **Server**: Uvicorn.
+---
 
-### Frontend (The Visor 🕶️)
-*   **Framework**: React 18, scaffolded with Vite for instantaneous HMR (Hot Module Replacement).
-*   **Styling**: TailwindCSS 4 + Lucide Icons for rapid, responsive UI creation.
-*   **Components**: Custom React components & `react-webcam` for fluid hardware integration.
+## 🏗️ Architecture
+
+```
+SarpGuard/
+├── backend/
+│   ├── main.py          # FastAPI server (port 8000)
+│   ├── detection.py     # snake-detection/2 + ByteTrack
+│   ├── classification.py # snake-venom/1 classifier
+│   ├── alerts.py        # Twilio WhatsApp integration
+│   └── storage.py       # Detection history (JSON)
+├── frontend/
+│   └── app.py           # Streamlit dashboard (port 8502)
+├── detected_images/     # Annotated output images
+├── .env                 # 🔒 All secrets (never committed)
+├── requirements.txt
+└── README.md
+```
+
+### AI Models (Roboflow Serverless)
+
+| Model | ID | Purpose | Training |
+|-------|----|---------|----------|
+| Snake Detector | `snake-detection/2` | Locate snake in frame | ~10,000 images |
+| Venom Classifier | `snake-venom/1` | VENOMOUS / NON VENOMOUS | Species dataset |
 
 ---
 
 ## 🚀 Quick Start
 
-Follow these instructions to spin up the SarpGuard environment locally.
+### 1. Clone & Setup
 
-### 1. Prerequisites
-Ensure you have the following installed on your system:
-*   Python 3.11+
-*   Node.js & npm (pnpm recommended)
-*   Git
-
-### 2. Environment Variables
-Create a `.env` file in the root backend directory:
-```env
-# Twilio Setup for WhatsApp Alerts
-TWILIO_ACCOUNT_SID=your_account_sid_here
-TWILIO_AUTH_TOKEN=your_auth_token_here
-TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
-ALERT_TARGET_NUMBER=whatsapp:+your_personal_number_with_country_code
-
-# Roboflow API (Classification Layer)
-ROBOFLOW_API_KEY=your_roboflow_key_here
-```
-
-### 3. Backend Setup
-Execute these commands in your terminal to bootstrap the AI API:
-
-```bash
-# Clone the repository
+```powershell
 git clone https://github.com/yourusername/SarpGuard.git
 cd SarpGuard
 
-# Create and activate a virtual environment
+# Create virtual environment
 python -m venv venv
+.\venv\Scripts\Activate.ps1      # Windows
+# source venv/bin/activate        # Linux/Mac
 
-# Windows
-venv\Scripts\activate
-# Linux/Mac
-# source venv/bin/activate
-
-# Install Python requirements
+# Install dependencies
 pip install -r requirements.txt
-
-# Start the FastAPI server on port 8000
-python backend/main.py
 ```
 
-### 4. Frontend Setup
-Open a new terminal window to serve the React application:
+### 2. Configure Environment
+
+Create a `.env` file in the project root:
+
+```env
+# Roboflow
+ROBOFLOW_API_KEY=your_roboflow_api_key
+
+# Twilio WhatsApp Alerts
+TWILIO_ACCOUNT_SID=your_account_sid
+TWILIO_AUTH_TOKEN=your_auth_token
+TWILIO_WHATSAPP_FROM=+14155238886
+TWILIO_TO_WHATSAPP=+91xxxxxxxxxx
+TWILIO_CONTENT_SID=your_content_sid
+```
+
+### 3. Run Backend
+
+```powershell
+python backend/main.py
+# API running at http://localhost:8000
+```
+
+### 4. Run Frontend
+
+Open a **new terminal**:
+
+```powershell
+.\venv\Scripts\Activate.ps1
+streamlit run frontend/app.py
+# Dashboard at http://localhost:8502
+```
+
+---
+
+## 📡 API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/` | Health check |
+| `POST` | `/detect` | Upload video for detection |
+| `GET` | `/history` | Fetch all past detections |
+| `GET` | `/images/{filename}` | Serve annotated images |
+
+### Example `/detect` Request
 
 ```bash
-cd SarpGuard/frontend
-
-# Install dependencies using pnpm (or npm / yarn)
-pnpm install
-
-# Build and Start the development server
-pnpm run dev
+curl -X POST http://localhost:8000/detect \
+  -F "file=@snake_video.mp4" \
+  -F "location=Playground Area"
 ```
 
-The frontend will be accessible at `http://localhost:5173`. 
+### Example Response
+
+```json
+{
+  "status": "VENOMOUS",
+  "confidence": 0.97,
+  "image_path": "detected_images/detected_20260223_143859.jpg",
+  "alert_sent": true
+}
+```
+
+---
+
+## 🧰 Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| **Backend API** | FastAPI + Uvicorn |
+| **Computer Vision** | OpenCV + Supervision |
+| **Object Tracking** | ByteTrack (via supervision) |
+| **AI Models** | Roboflow Inference SDK |
+| **Alerts** | Twilio WhatsApp API |
+| **Frontend** | Streamlit |
+| **Env Management** | python-dotenv |
+
+---
+
+## 🔒 Security
+
+- All credentials stored in `.env` only — never hardcoded
+- `.env` listed in `.gitignore`
+- API keys loaded via `os.getenv()` at runtime
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions to making SarpGuard even better. 
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Commit changes: `git commit -m 'Add my feature'`
+4. Push: `git push origin feature/my-feature`
 5. Open a Pull Request
 
-## 🛡️ License
+---
 
-Distributed under the MIT License. See `LICENSE` for more information.
+## 📄 License
+
+Distributed under the MIT License.
 
 <div align="center">
-  <sub>Built with passion for community safety.</sub>
+  <sub>Built with ❤️ for community safety — SarpGuard 🐍</sub>
 </div>
