@@ -1,11 +1,40 @@
 import cv2
 import os
 import numpy as np
+import subprocess
 from inference_sdk import InferenceHTTPClient
 from dotenv import load_dotenv
 import supervision as sv
 
 load_dotenv()
+
+def convert_video_to_mp4(input_path: str) -> str:
+    """
+    Converts any video format to a standard H.264 MP4 that OpenCV can reliably read.
+    Uses the ffmpeg binary bundled with imageio-ffmpeg (no system install needed).
+    Returns the path to the converted file, or the original if conversion fails/is unnecessary.
+    """
+    output_path = input_path.rsplit(".", 1)[0] + "_converted.mp4"
+    try:
+        import imageio_ffmpeg
+        ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+        result = subprocess.run(
+            [ffmpeg_path, "-y", "-i", input_path,
+             "-c:v", "libx264", "-preset", "ultrafast",
+             "-movflags", "+faststart",  # Puts moov atom at the start
+             "-an",  # No audio needed
+             output_path],
+            capture_output=True, text=True, timeout=60
+        )
+        if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            print(f"[VideoConvert] Converted {input_path} → {output_path}")
+            return output_path
+        else:
+            print(f"[VideoConvert] ffmpeg failed: {result.stderr[:300]}")
+            return input_path
+    except Exception as e:
+        print(f"[VideoConvert] Conversion error: {e}")
+        return input_path
 
 API_KEY = os.getenv("ROBOFLOW_API_KEY")
 DETECTION_MODEL_ID = "snake-detection/2"
@@ -66,9 +95,16 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
         is_spoof (bool): True if a screen device or screen artifact was found overlapping/during the snake detection
         spoof_reason (str): Reason for the spoof classification
     """
-    cap = cv2.VideoCapture(video_path)
+    # Convert video to a standard MP4 format that OpenCV can reliably read
+    # This fixes WebM, MOV, and other formats that fail on headless Linux servers
+    converted_path = convert_video_to_mp4(video_path)
+    
+    cap = cv2.VideoCapture(converted_path)
     if not cap.isOpened():
-        print("[Detection] Could not open video.")
+        print(f"[Detection] Could not open video: {converted_path}")
+        # Cleanup converted file if it's different from original
+        if converted_path != video_path and os.path.exists(converted_path):
+            os.remove(converted_path)
         return False, 0.0, "", False, ""
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -290,16 +326,22 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
 
         cv2.imwrite(output_image_path, best_frame)
         print(f"[Detection] Best detection: {best_confidence*100:.1f}% confidence | Spoof: {is_spoof_detected}")
+        # Cleanup converted video file
+        if converted_path != video_path and os.path.exists(converted_path):
+            os.remove(converted_path)
         return True, best_confidence, final_crop_path, is_spoof_detected, final_spoof_reason_str
     else:
         # No snake detected in any frame — save the middle frame as fallback
-        cap = cv2.VideoCapture(video_path)
+        cap = cv2.VideoCapture(converted_path)
         cap.set(cv2.CAP_PROP_POS_FRAMES, total_frames // 2)
         ret, frame = cap.read()
         cap.release()
         if ret:
             cv2.imwrite(output_image_path, frame)
         print("[Detection] No snake found in any sampled frame.")
+        # Cleanup converted video file
+        if converted_path != video_path and os.path.exists(converted_path):
+            os.remove(converted_path)
         return False, 0.0, "", False, ""
 
 def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float, list, bool, str]:
