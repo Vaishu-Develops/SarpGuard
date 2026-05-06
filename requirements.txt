@@ -11,3 +11,4 @@ requests
 twilio
 supervision
 ultralytics
+imageio-ffmpeg
