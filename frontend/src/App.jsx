@@ -5,6 +5,8 @@ import SnakeDetectedScreen from './components/SnakeDetectedScreen';
 import AllClearScreen from './components/AllClearScreen';
 import SpoofWarningScreen from './components/SpoofWarningScreen';
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 const LOCATIONS = {
     'block-a': { name: 'Block A - Main Entrance' },
     'block-b': { name: 'Block B - Gate 2' },
@@ -52,7 +54,7 @@ export default function App() {
         let resultStatus = 'VENOMOUS';
 
         try {
-            const response = await fetch('http://localhost:8000/detect', {
+            const response = await fetch(`${API_BASE_URL}/detect`, {
                 method: 'POST',
                 body: formData,
             });
@@ -75,7 +77,7 @@ export default function App() {
 
                 resultHasSnake = data.status && data.status.toUpperCase() !== 'NO SNAKE DETECTED';
                 resultStatus = data.status.toUpperCase();
-                resultImagePath = data.image_path ? `http://localhost:8000${data.image_path}` : '';
+                resultImagePath = data.image_path ? `${API_BASE_URL}${data.image_path}` : '';
                 resultTimestamp = data.timestamp || '';
             } else {
                 console.error("API Response not OK");
