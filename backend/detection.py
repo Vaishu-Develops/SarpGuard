@@ -35,7 +35,6 @@ def convert_video_to_mp4(input_path: str) -> str:
     except Exception as e:
         print(f"[VideoConvert] Conversion error: {e}")
         return input_path
-
 API_KEY = os.getenv("ROBOFLOW_API_KEY")
 DETECTION_MODEL_ID = "snake-detection/2"
 
@@ -44,24 +43,42 @@ CLIENT = InferenceHTTPClient(
     api_key=API_KEY
 )
 
-# Initialize YOLOv8 for device detection (Anti-Spoof Layer 0)
+# Lazy-loaded models (loaded on first use so server port opens immediately)
 from ultralytics import YOLO
 import threading
 
-# Model path: prefer backend/model/yolov8n.pt if available, else fall back to root
-_MODEL_PATH = os.path.join(os.path.dirname(__file__), "model", "yolov8n.pt")
-if not os.path.exists(_MODEL_PATH):
-    _MODEL_PATH = "yolov8n.pt"  # fallback: auto-download to cwd
-device_model = YOLO(_MODEL_PATH)
-print(f"[AntiSpoof] YOLOv8 loaded from: {_MODEL_PATH}")
+_device_model = None
+_byte_tracker = None
+
+def get_device_model():
+    """Lazy-load YOLOv8 model on first use so the server starts fast."""
+    global _device_model
+    if _device_model is None:
+        # Use absolute path based on this file's location
+        _MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model", "yolov8n.pt")
+        if not os.path.exists(_MODEL_PATH):
+            _MODEL_PATH = "yolov8n.pt"  # fallback: auto-download
+        print(f"[AntiSpoof] Loading YOLOv8 from: {_MODEL_PATH} (exists={os.path.exists(_MODEL_PATH)})")
+        _device_model = YOLO(_MODEL_PATH)
+        print(f"[AntiSpoof] YOLOv8 loaded successfully")
+    return _device_model
+
+def get_byte_tracker():
+    """Lazy-load ByteTrack on first use."""
+    global _byte_tracker
+    if _byte_tracker is None:
+        _byte_tracker = sv.ByteTrack()
+    return _byte_tracker
+
+# Keep these as module-level references for backward compatibility with imports
+@property
+def device_model_property(self):
+    return get_device_model()
 
 # COCO classes for screen/fake-source detection:
 # 62 = tv, 63 = laptop, 67 = cell phone, 73 = book (could hold printed snake photo)
 DEVICE_CLASSES = [62, 63, 67, 73]
 DEVICE_CLASS_NAMES = {62: "TV", 63: "Laptop", 67: "Phone", 73: "Book/Print"}
-
-# Initialize ByteTrack for snake tracking across frames
-byte_tracker = sv.ByteTrack()
 
 def check_bbox_overlap(boxA, boxB):
     """
@@ -101,7 +118,7 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
         spoof_artifact_result[0], spoof_artifact_result[1], spoof_artifact_result[2] = detect_screen_artifact(frame)
 
     def run_device_check():
-        results = device_model.predict(frame, classes=DEVICE_CLASSES, verbose=False)
+        results = get_device_model().predict(frame, classes=DEVICE_CLASSES, verbose=False)
         for box in results[0].boxes:
             xyxy = box.xyxy[0].cpu().numpy()
             cls = int(box.cls[0].cpu().item())
@@ -148,7 +165,7 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
     for device in spoof_device_boxes:
         if check_bbox_overlap(snake_xyxy, device["box"]):
             is_spoof = True
-            cls_name = device_model.names[device["cls"]]
+            cls_name = get_device_model().names[device["cls"]]
             spoof_reasons.append(f"Snake overlaps '{cls_name}' display")
 
     # Crop the snake region
@@ -231,7 +248,7 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
     print(f"[Detection] Sampling {len(frame_indices)} frames from video with ByteTrack + AntiSpoof")
 
     # Reset tracker for new video
-    byte_tracker.reset()
+    get_byte_tracker().reset()
 
     for idx in frame_indices:
         cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
@@ -252,7 +269,7 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
 
         # 2. Run Device Object Detection thread
         def run_device_check():
-            results = device_model.predict(frame, classes=DEVICE_CLASSES, verbose=False)
+            results = get_device_model().predict(frame, classes=DEVICE_CLASSES, verbose=False)
             for box in results[0].boxes:
                 # [x1, y1, x2, y2]
                 xyxy = box.xyxy[0].cpu().numpy()
@@ -306,7 +323,7 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
                 )
 
                 # Apply ByteTrack tracker
-                detections = byte_tracker.update_with_detections(detections)
+                detections = get_byte_tracker().update_with_detections(detections)
 
                 # Store best detection
                 if len(predictions) > 0:
@@ -346,7 +363,7 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
                 for device in spoof_device_boxes:
                     if check_bbox_overlap(snake_xyxy, device["box"]):
                         frame_is_spoof = True
-                        cls_name = device_model.names[device["cls"]]
+                        cls_name = get_device_model().names[device["cls"]]
                         frame_spoof_reasons.append(f"Snake overlaps with detected '{cls_name}' display (conf: {device['conf']:.2f})")
 
                 # Accumulate spoof reasoning across the video
@@ -496,7 +513,7 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
 
         def run_device_detection():
             try:
-                results = device_model.predict(frame, classes=DEVICE_CLASSES, verbose=False)
+                results = get_device_model().predict(frame, classes=DEVICE_CLASSES, verbose=False)
                 for box in results[0].boxes:
                     xyxy = box.xyxy[0].cpu().numpy().tolist()
                     cls = int(box.cls[0].cpu().item())
