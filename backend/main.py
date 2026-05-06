@@ -1,7 +1,9 @@
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Form
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Annotated
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 import os
 import uvicorn
 import sys
@@ -30,6 +32,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    print(f"[DEBUG] 422 Validation Error: {exc.errors()}", flush=True)
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "body": str(exc.body)},
+    )
+
 # Ensure images directory exists
 os.makedirs("detected_images", exist_ok=True)
 app.mount("/images", StaticFiles(directory="detected_images"), name="images")
@@ -50,7 +60,11 @@ def read_root():
     return {"message": "SarpGuard Backend API is running"}
 
 @app.post("/detect")
-async def detect(background_tasks: BackgroundTasks, file: UploadFile = File(...), location: str = Form("Unknown")):
+async def detect(
+    background_tasks: BackgroundTasks, 
+    file: Annotated[UploadFile, File(...)], 
+    location: Annotated[str, Form()] = "Unknown"
+):
     import uuid
     from datetime import datetime
     import shutil
