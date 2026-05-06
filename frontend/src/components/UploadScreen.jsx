@@ -11,6 +11,8 @@ const LOCATIONS = [
     { id: 'block-f', name: 'BLOCK F - PLAYGROUND' },
 ];
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 export default function UploadScreen({ onAnalyze, file, setFile, location, setLocation }) {
     const fileInputRef = useRef(null);
     const webcamRef = useRef(null);
@@ -112,7 +114,7 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
             const imageSrc = webcamRef.current.getScreenshot();
             if (!imageSrc) return;
             try {
-                const res = await fetch("http://localhost:8000/detect-device", {
+                const res = await fetch(`${API_BASE_URL}/detect-device`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ frame: imageSrc })
@@ -147,7 +149,7 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
             if (!imageSrc) return;
 
             try {
-                const response = await fetch("http://localhost:8000/detect-live", {
+                const response = await fetch(`${API_BASE_URL}/detect-live`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ frame: imageSrc })
