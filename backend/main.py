@@ -14,7 +14,7 @@ sys.stderr.reconfigure(line_buffering=True)  # type: ignore
 # Add parent directory to path so imports work
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from backend.detection import detect_snake, detect_snake_frame, detect_screen_artifact
+from backend.detection import detect_snake, detect_snake_image, detect_snake_frame, detect_screen_artifact
 from backend.classification import classify_snake
 from backend.alerts import send_whatsapp_alert, send_tamper_alert
 from backend.storage import save_detection, get_history
@@ -61,26 +61,33 @@ async def detect(background_tasks: BackgroundTasks, file: UploadFile = File(...)
     readable_timestamp = datetime.now().strftime("%d-%b-%Y %H:%M")
     
     uid = uuid.uuid4().hex[:8]
-    ext = os.path.splitext(file.filename)[1] if file.filename else ".mp4"
+    content_type = file.content_type or ""
+    original_filename = file.filename or ""
+    ext = os.path.splitext(original_filename)[1].lower()
+
+    # Determine if this is an image or a video
+    IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
+    IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/bmp", "image/gif"}
+    is_image = (ext in IMAGE_EXTS) or (content_type in IMAGE_CONTENT_TYPES)
+
     if not ext:
-        ext = ".mp4"
-        
-    video_filename = f"temp_{timestamp_str}_{uid}{ext}"
+        ext = ".jpg" if is_image else ".mp4"
+
+    input_filename = f"temp_{timestamp_str}_{uid}{ext}"
     image_filename = f"detected_images/detected_{timestamp_str}_{uid}.jpg"
     crop_filename = f"detected_images/crop_{timestamp_str}_{uid}.jpg"
-    
-    with open(video_filename, "wb") as buffer:
+
+    print(f"[Main] Received file: '{original_filename}' content_type='{content_type}' is_image={is_image}")
+
+    with open(input_filename, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
     try:
-        import cv2 as _cv2
-        import numpy as _np
-        
-        # The old Layer 0 early Return was removed here
-        # Spoof checks are now parallelized inside detect_snake to correlate with the snake bounding box
-        
-        # === LAYER 1+: Normal Detection Pipeline ===
-        detected, yolo_conf, actual_crop_path, is_spoof, spoof_reason = detect_snake(video_filename, image_filename, crop_filename)
+        # Route to image or video detection pipeline
+        if is_image:
+            detected, yolo_conf, actual_crop_path, is_spoof, spoof_reason = detect_snake_image(input_filename, image_filename, crop_filename)
+        else:
+            detected, yolo_conf, actual_crop_path, is_spoof, spoof_reason = detect_snake(input_filename, image_filename, crop_filename)
         
         status = "Harmless"
         confidence = 0.0
@@ -128,9 +135,8 @@ async def detect(background_tasks: BackgroundTasks, file: UploadFile = File(...)
         return {"status": "No Snake Detected", "confidence": 0.0, "image_path": "", "alert_sent": False, "timestamp": readable_timestamp}
         
     finally:
-        # Cleanup video, keep image for dashboard
-        if os.path.exists(video_filename):
-            os.remove(video_filename)
+        if os.path.exists(input_filename):
+            os.remove(input_filename)
         if os.path.exists(crop_filename):
             os.remove(crop_filename)
 

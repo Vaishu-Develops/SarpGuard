@@ -82,6 +82,97 @@ def check_bbox_overlap(boxA, boxB):
     # If the intersection covers at least 30% of the snake, consider it overlapping
     return (interArea / float(boxAArea)) > 0.3
 
+def detect_snake_image(image_path: str, output_image_path: str, crop_image_path: str) -> tuple[bool, float, str, bool, str]:
+    """
+    Handles a single still image (JPEG/PNG/WebP) uploaded directly.
+    Runs Roboflow snake detection + YOLO anti-spoof + screen artifact checks.
+    Returns the same tuple as detect_snake().
+    """
+    print(f"[Detection] Processing as single image: {image_path}")
+    frame = cv2.imread(image_path)
+    if frame is None:
+        print(f"[Detection] Could not read image: {image_path}")
+        return False, 0.0, "", False, ""
+
+    spoof_artifact_result = [False, 0.0, ""]
+    spoof_device_boxes = []
+
+    def run_artifact_check():
+        spoof_artifact_result[0], spoof_artifact_result[1], spoof_artifact_result[2] = detect_screen_artifact(frame)
+
+    def run_device_check():
+        results = device_model.predict(frame, classes=DEVICE_CLASSES, verbose=False)
+        for box in results[0].boxes:
+            xyxy = box.xyxy[0].cpu().numpy()
+            cls = int(box.cls[0].cpu().item())
+            conf = box.conf[0].cpu().item()
+            if conf > 0.4:
+                spoof_device_boxes.append({"box": xyxy, "cls": cls, "conf": conf})
+
+    import threading
+    t1 = threading.Thread(target=run_artifact_check)
+    t2 = threading.Thread(target=run_device_check)
+    t1.start(); t2.start()
+
+    # Run Roboflow detection on the image
+    try:
+        result = CLIENT.infer(image_path, model_id=DETECTION_MODEL_ID)
+        predictions = result.get("predictions", [])
+        print(f"[Detection] Image: {len(predictions)} predictions found")
+    except Exception as e:
+        print(f"[Detection] Roboflow error: {e}")
+        t1.join(); t2.join()
+        return False, 0.0, "", False, ""
+
+    t1.join(); t2.join()
+
+    if not predictions:
+        print("[Detection] No snake found in image.")
+        return False, 0.0, "", False, ""
+
+    top = sorted(predictions, key=lambda x: x["confidence"], reverse=True)[0]
+    conf = top["confidence"]
+    print(f"[Detection] Image snake found: {conf*100:.1f}% confidence")
+
+    x, y = top["x"], top["y"]
+    box_w, box_h = top["width"], top["height"]
+    snake_xyxy = [x - box_w / 2, y - box_h / 2, x + box_w / 2, y + box_h / 2]
+
+    # Anti-spoof evaluation
+    is_spoof = False
+    spoof_reasons = []
+    art_is_spoof, _, art_reason = spoof_artifact_result
+    if art_is_spoof:
+        is_spoof = True
+        spoof_reasons.append(art_reason)
+    for device in spoof_device_boxes:
+        if check_bbox_overlap(snake_xyxy, device["box"]):
+            is_spoof = True
+            cls_name = device_model.names[device["cls"]]
+            spoof_reasons.append(f"Snake overlaps '{cls_name}' display")
+
+    # Crop the snake region
+    h, w = frame.shape[:2]
+    pad_x = int(box_w * 0.1)
+    pad_y = int(box_h * 0.1)
+    cx1 = max(0, int(x - box_w // 2 - pad_x))
+    cy1 = max(0, int(y - box_h // 2 - pad_y))
+    cx2 = min(w, int(x + box_w // 2 + pad_x))
+    cy2 = min(h, int(y + box_h // 2 + pad_y))
+    crop = frame[cy1:cy2, cx1:cx2]
+    final_crop_path = crop_image_path
+    if crop.size > 0:
+        cv2.imwrite(crop_image_path, crop)
+    else:
+        final_crop_path = output_image_path
+
+    # Draw bounding box on output image
+    cv2.rectangle(frame, (int(snake_xyxy[0]), int(snake_xyxy[1])), (int(snake_xyxy[2]), int(snake_xyxy[3])), (0, 0, 255), 2)
+    cv2.putText(frame, f"Snake {conf*100:.1f}%", (int(snake_xyxy[0]), int(snake_xyxy[1]) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+    cv2.imwrite(output_image_path, frame)
+
+    return True, conf, final_crop_path, is_spoof, " | ".join(spoof_reasons)
+
 def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, max_samples: int = 20) -> tuple[bool, float, str, bool, str]:
     """
     Samples multiple frames from the video, runs Roboflow snake-detection/2 detection,

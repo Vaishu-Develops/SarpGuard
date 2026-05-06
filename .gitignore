@@ -134,8 +134,6 @@ detected_*.jpg
 test_roboflow.py
 test_api.py
 create_test_video.py
-yolov8n.pt
-snake_yolo.pt
 detections.json
 
 # Node.js and build output
