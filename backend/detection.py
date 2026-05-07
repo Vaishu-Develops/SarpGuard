@@ -146,8 +146,20 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
     t1.join(); t2.join()
 
     if not predictions:
-        print("[Detection] No snake found in image.")
-        return False, 0.0, "", False, ""
+        print("[Detection] No snake found in image. Checking for spoofing anyway...")
+        # Check if it was a spoof even without a snake
+        is_spoof = False
+        spoof_reasons = []
+        art_is_spoof, _, art_reason = spoof_artifact_result
+        if art_is_spoof:
+            is_spoof = True
+            spoof_reasons.append(art_reason)
+        for device in spoof_device_boxes:
+            is_spoof = True
+            cls_name = get_device_model().names[device["cls"]]
+            spoof_reasons.append(f"Detected '{cls_name}' display")
+            
+        return False, 0.0, "", is_spoof, " | ".join(spoof_reasons)
 
     top = sorted(predictions, key=lambda x: x["confidence"], reverse=True)[0]
     conf = top["confidence"]
@@ -454,11 +466,12 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
         cap.release()
         if ret:
             cv2.imwrite(output_image_path, frame)
-        print("[Detection] No snake found in any sampled frame.")
+        print("[Detection] No snake found in any sampled frame. Checking for spoofing anyway...")
+        # Return spoof info even if no snake found
         # Cleanup converted video file
         if converted_path != video_path and os.path.exists(converted_path):
             os.remove(converted_path)
-        return False, 0.0, "", False, ""
+        return False, 0.0, "", is_spoof_detected, final_spoof_reason_str
 
 def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float, list, bool, str]:
     """

@@ -115,6 +115,24 @@ async def detect(
         confidence = 0.0
         alert_sent = False
         
+        # 3. Spoof Logic (Priority 1: Check even if no snake found)
+        if is_spoof:
+            print(f"[Main] 🛑 Spoof detected. Reason: {spoof_reason}")
+            status = "Media Spoof Detected"
+            
+            # Send alert only if confidence is high or a snake was also found
+            if detected or yolo_conf > 0.5:
+                send_tamper_alert(location, yolo_conf * 100, spoof_reason)
+            
+            return {
+                "status": status,
+                "confidence": yolo_conf * 100,
+                "image_path": f"/images/detected_{timestamp_str}_{uid}.jpg" if os.path.exists(image_filename) else "",
+                "alert_sent": False,
+                "timestamp": readable_timestamp,
+                "spoof_reason": spoof_reason
+            }
+
         if detected:
             # 2. Classification using real Roboflow API (Layer 3 - Applied strictly to the CROP)
             status, classification_conf = classify_snake(actual_crop_path, mock=False)
@@ -126,15 +144,8 @@ async def detect(
                 print(f"[Main] Rejected detection as false positive. Classifier confidence too low: {confidence:.1f}%")
                 return {"status": "No Snake Detected", "confidence": 0.0, "image_path": "", "alert_sent": False, "timestamp": readable_timestamp}
             
-            # 3. Alert or Spoof Block
-            if is_spoof:
-                print(f"[Main] 🛑 Spoof detected during snake detection. Reason: {spoof_reason}")
-                send_tamper_alert(location, confidence, spoof_reason)
-                status = "PHONE / SCREEN VIDEO DETECTED"
-                alert_sent = False
-            else:
-                alert_sent = send_whatsapp_alert(location, confidence, status)
-                
+            alert_sent = send_whatsapp_alert(location, confidence, status)
+            
             # 4. Save history
             record = {
                 "id": uid,
