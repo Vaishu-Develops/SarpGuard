@@ -186,8 +186,10 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
     conf = top["confidence"]
     print(f"[Detection] Image snake found: {conf*100:.1f}% confidence")
 
-    x, y = top["x"], top["y"]
-    box_w, box_h = top["width"], top["height"]
+    # Handle both direct and nested 'bbox' formats from Roboflow
+    bbox = top["bbox"] if "bbox" in top else top
+    x, y = bbox["x"], bbox["y"]
+    box_w, box_h = bbox["width"], bbox["height"]
     snake_xyxy = [x - box_w / 2, y - box_h / 2, x + box_w / 2, y + box_h / 2]
 
     # Anti-spoof evaluation
@@ -339,8 +341,10 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
                 boxes = []
                 confidences = []
                 for pred in predictions:
-                    x, y = pred["x"], pred["y"]
-                    box_w, box_h = pred["width"], pred["height"]
+                    # Handle both direct and nested 'bbox' formats from Roboflow
+                    bbox = pred["bbox"] if "bbox" in pred else pred
+                    x, y = bbox["x"], bbox["y"]
+                    box_w, box_h = bbox["width"], bbox["height"]
                     x1 = x - box_w / 2
                     y1 = y - box_h / 2
                     x2 = x + box_w / 2
@@ -551,16 +555,18 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
                 max_conf = 0.0
                 boxes = []
                 for pred in predictions:
+                    # Handle both direct and nested 'bbox' formats from Roboflow
+                    bbox = pred["bbox"] if "bbox" in pred else pred
                     conf = pred["confidence"]
                     if conf > max_conf:
                         max_conf = conf
                     boxes.append({
-                        "x": pred["x"],
-                        "y": pred["y"],
-                        "width": pred["width"],
-                        "height": pred["height"],
-                        "confidence": conf,
-                        "type": "snake"
+                        "x": bbox["x"],
+                        "y": bbox["y"],
+                        "width": bbox["width"],
+                        "height": bbox["height"],
+                        "class": pred.get("class", "Snake"),
+                        "confidence": conf
                     })
                 snake_result[0] = len(boxes) > 0
                 snake_result[1] = boxes
