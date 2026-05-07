@@ -139,18 +139,18 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
         spoof_artifact_result[0], spoof_artifact_result[1], spoof_artifact_result[2] = detect_screen_artifact(frame)
 
     def run_device_check():
-        results = get_device_model().predict(frame, classes=DEVICE_CLASSES, verbose=False)
+        # Reduced imgz to 320 for significant memory savings on Render
+        results = get_device_model().predict(frame, classes=DEVICE_CLASSES, verbose=False, imgsz=320)
         for box in results[0].boxes:
             xyxy = box.xyxy[0].cpu().numpy()
             cls = int(box.cls[0].cpu().item())
             conf = box.conf[0].cpu().item()
-            if conf > 0.3:  # Lowered from 0.4
+            if conf > 0.3:
                 spoof_device_boxes.append({"box": xyxy, "cls": cls, "conf": conf})
 
-    import threading
-    t1 = threading.Thread(target=run_artifact_check)
-    t2 = threading.Thread(target=run_device_check)
-    t1.start(); t2.start()
+    # Run checks sequentially on memory-constrained Render to prevent crashes
+    run_artifact_check()
+    run_device_check()
 
     # Run Roboflow detection on the image
     try:
@@ -580,7 +580,8 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
 
         def run_device_detection():
             try:
-                results = get_device_model().predict(frame, classes=DEVICE_CLASSES, verbose=False)
+                # Reduced imgsz to 320 for live tracking efficiency
+                results = get_device_model().predict(frame, classes=DEVICE_CLASSES, verbose=False, imgsz=320)
                 for box in results[0].boxes:
                     xyxy = box.xyxy[0].cpu().numpy().tolist()
                     cls = int(box.cls[0].cpu().item())
@@ -600,11 +601,10 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
         def run_artifact_detection():
             artifact_result[0], artifact_result[1], artifact_result[2] = detect_screen_artifact(frame)
 
-        t1 = threading.Thread(target=run_snake_detection)
-        t2 = threading.Thread(target=run_device_detection)
-        t3 = threading.Thread(target=run_artifact_detection)
-        t1.start(); t2.start(); t3.start()
-        t1.join(); t2.join(); t3.join()
+        # Run checks sequentially on memory-constrained Render to prevent crashes
+        run_snake_detection()
+        run_device_detection()
+        run_artifact_detection()
 
         detected, snake_boxes, max_conf = snake_result
         is_artifact, art_score, art_reason = artifact_result
