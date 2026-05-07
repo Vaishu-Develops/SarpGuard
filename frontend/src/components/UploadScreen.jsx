@@ -134,7 +134,7 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
         };
 
         detectDevice(); // run immediately on enable
-        const deviceInterval = setInterval(detectDevice, 400);
+        const deviceInterval = setInterval(detectDevice, 1500);
         return () => clearInterval(deviceInterval);
     }, [isLiveDetecting, isCameraActive]);
 
