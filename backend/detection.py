@@ -575,13 +575,21 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
         detected, snake_boxes, max_conf = snake_result
         is_artifact, art_score, art_reason = artifact_result
 
-        # Correlate: does any snake box overlap a device box?
+        # Correlate: does any snake box overlap a device box? Or is there an artifact?
         spoof_detected = False
         spoof_reasons = []
 
-        if detected and is_artifact:
+        if is_artifact:
             spoof_detected = True
             spoof_reasons.append(art_reason)
+
+        if len(device_result) > 0:
+            # Report devices found even if they don't overlap a snake
+            # (Provides more feedback to the user)
+            for dbox in device_result:
+                if not spoof_detected: # only add one general reason if we don't have one
+                    spoof_detected = True
+                spoof_reasons.append(f"Detected '{dbox['label']}'")
 
         if detected:
             for sbox in snake_boxes:
@@ -594,8 +602,7 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
                 for dbox in device_result:
                     d_xyxy = [dbox["x1"], dbox["y1"], dbox["x2"], dbox["y2"]]
                     if check_bbox_overlap(snake_xyxy, d_xyxy):
-                        spoof_detected = True
-                        spoof_reasons.append(f"Snake overlaps '{dbox['label']}'")
+                        spoof_reasons.append(f"Snake overlaps '{dbox['label']}' display")
 
         spoof_reason_str = " | ".join(spoof_reasons) if spoof_reasons else ""
         print(f"[Live Detection] snake={detected} conf={max_conf:.2f} devices={len(device_result)} spoof={spoof_detected}")
