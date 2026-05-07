@@ -123,7 +123,7 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
             xyxy = box.xyxy[0].cpu().numpy()
             cls = int(box.cls[0].cpu().item())
             conf = box.conf[0].cpu().item()
-            if conf > 0.4:
+            if conf > 0.3:  # Lowered from 0.4
                 spoof_device_boxes.append({"box": xyxy, "cls": cls, "conf": conf})
 
     import threading
@@ -137,7 +137,9 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
         predictions = result.get("predictions", [])
         print(f"[Detection] Image: {len(predictions)} predictions found")
     except Exception as e:
-        print(f"[Detection] Roboflow error: {e}")
+        print(f"[Detection] Roboflow ERROR: {e}")
+        import traceback
+        traceback.print_exc()
         t1.join(); t2.join()
         return False, 0.0, "", False, ""
 
@@ -275,7 +277,7 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
                 xyxy = box.xyxy[0].cpu().numpy()
                 cls = int(box.cls[0].cpu().item())
                 conf = box.conf[0].cpu().item()
-                if conf > 0.4: # Only consider reasonably confident device detections
+                if conf > 0.3: # Lowered from 0.4
                     spoof_device_boxes.append({"box": xyxy, "cls": cls, "conf": conf})
 
         # Start background threads for anti-spoof checks
@@ -299,6 +301,7 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
             snake_xyxy = None
 
             if predictions:
+                print(f"[Detection] Frame {idx}: Raw Predictions: {predictions}")
                 # Convert Roboflow predictions to supervision Detections format
                 boxes = []
                 confidences = []
@@ -330,6 +333,10 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
                     top = sorted(predictions, key=lambda x: x["confidence"], reverse=True)[0]
                     conf = top["confidence"]
                     print(f"[Detection] Frame {idx}: snake found with {conf*100:.1f}% confidence")
+                    
+                    # Log if it was rejected by a threshold
+                    if conf < 0.4:
+                        print(f"[Detection] Frame {idx}: REJECTED (below 0.4 threshold)")
 
                     x, y = top["x"], top["y"]
                     box_w, box_h = top["width"], top["height"]
@@ -345,7 +352,8 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
                     top_snake_pred = top
 
             else:
-                print(f"[Detection] Frame {idx}: no snake detected")
+                if idx % 5 == 0: # Reduce log spam
+                    print(f"[Detection] Frame {idx}: no snake detected")
 
             # --- Anti-Spoof Logic Evaluation for this frame ---
             # We only care about spoofing if a snake is potentially present
@@ -508,6 +516,10 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
                 snake_result[0] = len(boxes) > 0
                 snake_result[1] = boxes
                 snake_result[2] = max_conf
+                if len(boxes) > 0:
+                    print(f"[Live Detection] Snake Found! Count: {len(boxes)}, Max Conf: {max_conf:.2f}")
+                else:
+                    print(f"[Live Detection] No snake found in frame.")
             except Exception as e:
                 print(f"[Live Detection] Snake detection error: {e}")
 
@@ -518,7 +530,7 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
                     xyxy = box.xyxy[0].cpu().numpy().tolist()
                     cls = int(box.cls[0].cpu().item())
                     conf = float(box.conf[0].cpu().item())
-                    if conf > 0.35:
+                    if conf > 0.25: # Lowered from 0.35
                         label = DEVICE_CLASS_NAMES.get(cls, f"Device({cls})")
                         device_result.append({
                             "x1": xyxy[0], "y1": xyxy[1],
