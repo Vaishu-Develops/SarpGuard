@@ -120,9 +120,9 @@ async def detect(
             status, classification_conf = classify_snake(actual_crop_path, mock=False)
             confidence = classification_conf * 100
             
-            # Confidence Threshold: Reject false positives from Object Detection (e.g. butterflies)
-            # If the classifier is unsure (<60% confidence), it's likely not a snake at all.
-            if confidence < 60.0:
+            # Confidence Threshold: Reject false positives from Object Detection
+            # Lowered to 40% to be more sensitive during testing
+            if confidence < 40.0:
                 print(f"[Main] Rejected detection as false positive. Classifier confidence too low: {confidence:.1f}%")
                 return {"status": "No Snake Detected", "confidence": 0.0, "image_path": "", "alert_sent": False, "timestamp": readable_timestamp}
             
