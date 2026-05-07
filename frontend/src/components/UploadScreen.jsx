@@ -134,7 +134,7 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
         };
 
         detectDevice(); // run immediately on enable
-        const deviceInterval = setInterval(detectDevice, 1500);
+        const deviceInterval = setInterval(detectDevice, 1000);
         return () => clearInterval(deviceInterval);
     }, [isLiveDetecting, isCameraActive]);
 
@@ -201,7 +201,8 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
         };
 
         if (isLiveDetecting && isCameraActive && !hasTriggeredRef.current) {
-            intervalId = setInterval(detectSnake, 2500); // slower — Roboflow cloud call
+            detectSnake(); // run immediately on enable
+            intervalId = setInterval(detectSnake, 2000); // 2s intervals
         } else {
             setLiveDetections([]);
             setStaticWarning(false);
