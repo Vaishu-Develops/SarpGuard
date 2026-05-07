@@ -270,6 +270,13 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
             ctx.fillText(`⚠ ${box.label} ${(box.confidence * 100).toFixed(0)}%`, x + 4, y - 7);
         });
 
+        // --- HEARTBEAT / DEBUG DOT (shows the canvas is actually rendering)
+        if (isLiveDetecting) {
+            ctx.fillStyle = '#10B981'; // Emerald Green
+            ctx.font = 'bold 10px monospace';
+            ctx.fillText(`● DRAW_ENGINE_ACTIVE [${canvas.width}x${canvas.height}]`, 15, canvas.height - 15);
+        }
+
     }, [liveDetections, liveDeviceBoxes]);
 
     return (
@@ -371,11 +378,12 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
                                                 videoConstraints={{ facingMode: "environment" }}
                                                 className="absolute inset-0 w-full h-full object-cover opacity-80"
                                             />
-                                            <canvas
-                                                ref={canvasRef}
-                                                className="absolute inset-0 w-full h-full object-cover pointer-events-none z-10 block"
-                                            />
                                         </div>
+
+                                        <canvas
+                                            ref={canvasRef}
+                                            className="absolute inset-0 w-full h-full object-cover pointer-events-none z-50 block"
+                                        />
 
                                         {/* Camera Overlay HUD */}
                                         <div className="absolute inset-0 pointer-events-none border-[4px] border-black/50"></div>

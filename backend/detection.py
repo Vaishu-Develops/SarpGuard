@@ -38,10 +38,24 @@ def convert_video_to_mp4(input_path: str) -> str:
 API_KEY = os.getenv("ROBOFLOW_API_KEY")
 DETECTION_MODEL_ID = "snake-detection/2"
 
-CLIENT = InferenceHTTPClient(
-    api_url="https://serverless.roboflow.com",
-    api_key=API_KEY
-)
+_client = None
+_client_lock = threading.Lock()
+
+def get_roboflow_client():
+    global _client
+    if _client is None:
+        with _client_lock:
+            if _client is not None:
+                return _client
+            api_key = os.getenv("ROBOFLOW_API_KEY")
+            if not api_key:
+                print("[CRITICAL] ROBOFLOW_API_KEY is missing!")
+            _client = InferenceHTTPClient(
+                api_url="https://serverless.roboflow.com",
+                api_key=api_key
+            )
+            print(f"[Info] Roboflow Client initialized (API Key present: {bool(api_key)})")
+    return _client
 
 # Lazy-loaded models (loaded on first use so server port opens immediately)
 from ultralytics import YOLO
@@ -500,6 +514,7 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
         base64_data = base64_data.split("base64,")[1]
         
     try:
+        print(f"[Live Detection] Received frame, base64 length: {len(base64_data)}")
         # Decode base64 to OpenCV image
         img_data = base64.b64decode(base64_data)
         np_arr = np.frombuffer(img_data, np.uint8)
@@ -516,9 +531,21 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
 
         def run_snake_detection():
             try:
-                # Encode to JPEG for more stable Roboflow API communication
-                _, buffer = cv2.imencode('.jpg', frame)
-                result = CLIENT.infer(buffer.tobytes(), model_id=DETECTION_MODEL_ID)
+                client = get_roboflow_client()
+                # Save to a temporary file to ensure Roboflow SDK accepts it
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                    _, buffer = cv2.imencode('.jpg', frame)
+                    tmp.write(buffer.tobytes())
+                    tmp_path = tmp.name
+                
+                try:
+                    result = client.infer(tmp_path, model_id=DETECTION_MODEL_ID)
+                    if os.path.exists(tmp_path): os.remove(tmp_path)
+                except Exception as e:
+                    if os.path.exists(tmp_path): os.remove(tmp_path)
+                    raise e
+                    
                 predictions = result.get("predictions", [])
                 max_conf = 0.0
                 boxes = []
