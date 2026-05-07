@@ -65,6 +65,11 @@ class LiveFrame(BaseModel):
     
 @app.get("/")
 def read_root():
+    api_key = os.getenv("ROBOFLOW_API_KEY")
+    if not api_key:
+        print("[CRITICAL] ROBOFLOW_API_KEY is missing from environment variables!", flush=True)
+    else:
+        print(f"[INFO] ROBOFLOW_API_KEY is configured (Length: {len(api_key)})", flush=True)
     return {"message": "SarpGuard Backend API is running"}
 
 @app.post("/detect")
