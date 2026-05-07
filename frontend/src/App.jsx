@@ -35,8 +35,9 @@ export default function App() {
 
     const locationName = location ? LOCATIONS[location]?.name || location : '';
 
-    const handleAnalyze = async (overrideFile = null) => {
-        const fileToUse = overrideFile || file;
+    const handleAnalyze = async (fileArg = null) => {
+        // Ensure we only use the argument if it's a real File/Blob (not a click event)
+        const fileToUse = (fileArg instanceof File || fileArg instanceof Blob) ? fileArg : file;
 
         setScreen('processing');
         setIsReady(false);
