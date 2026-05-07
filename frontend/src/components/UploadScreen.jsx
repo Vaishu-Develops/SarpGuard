@@ -504,7 +504,7 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
                 <div className="mt-8 pt-6 border-t border-slate-700/50 flex justify-end">
                     <button
                         disabled={!file || !location}
-                        onClick={onAnalyze}
+                        onClick={() => onAnalyze()}
                         className={`group relative px-8 py-4 text-xs font-bold tracking-[0.2em] uppercase transition-all overflow-hidden ${(!file || !location) ? 'bg-surface border border-slate-700 text-slate-600 cursor-not-allowed' : 'bg-processing/20 border border-processing text-processing hover:bg-processing hover:text-surface hover:shadow-[0_0_20px_rgba(56,189,248,0.5)]'}`}
                     >
                         {/* Button corner details */}
