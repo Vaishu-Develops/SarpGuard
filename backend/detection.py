@@ -49,18 +49,24 @@ import threading
 
 _device_model = None
 _byte_tracker = None
+_model_lock = threading.Lock()
 
 def get_device_model():
-    """Lazy-load YOLOv8 model on first use so the server starts fast."""
+    """Lazy-load YOLOv8 model on first use with a lock to prevent concurrent loading spikes."""
     global _device_model
     if _device_model is None:
-        # Use absolute path based on this file's location
-        _MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model", "yolov8n.pt")
-        if not os.path.exists(_MODEL_PATH):
-            _MODEL_PATH = "yolov8n.pt"  # fallback: auto-download
-        print(f"[AntiSpoof] Loading YOLOv8 from: {_MODEL_PATH} (exists={os.path.exists(_MODEL_PATH)})")
-        _device_model = YOLO(_MODEL_PATH)
-        print(f"[AntiSpoof] YOLOv8 loaded successfully")
+        with _model_lock:
+            # Check again inside lock (double-checked locking)
+            if _device_model is not None:
+                return _device_model
+                
+            # Use absolute path based on this file's location
+            _MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model", "yolov8n.pt")
+            if not os.path.exists(_MODEL_PATH):
+                _MODEL_PATH = "yolov8n.pt"  # fallback: auto-download
+            print(f"[AntiSpoof] Loading YOLOv8 from: {_MODEL_PATH} (exists={os.path.exists(_MODEL_PATH)})")
+            _device_model = YOLO(_MODEL_PATH)
+            print(f"[AntiSpoof] YOLOv8 loaded successfully")
     return _device_model
 
 def get_byte_tracker():
@@ -510,7 +516,9 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
 
         def run_snake_detection():
             try:
-                result = CLIENT.infer(frame, model_id=DETECTION_MODEL_ID)
+                # Encode to JPEG for more stable Roboflow API communication
+                _, buffer = cv2.imencode('.jpg', frame)
+                result = CLIENT.infer(buffer.tobytes(), model_id=DETECTION_MODEL_ID)
                 predictions = result.get("predictions", [])
                 max_conf = 0.0
                 boxes = []
