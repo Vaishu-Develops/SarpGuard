@@ -15,6 +15,12 @@ export default function ProcessingScreen({ isReady, onComplete, locationName }) 
 
         if (progress === 100 && !isReady) return;
 
+        const failsafe = setTimeout(() => {
+            if (!isReady && screen === 'processing') {
+                console.error("Analysis Timeout Reached");
+            }
+        }, 30000); // 30s max wait
+
         const timer = setInterval(() => {
             // Hold at 94% if waiting on network
             if (!isReady && current > 94) return;
@@ -32,7 +38,10 @@ export default function ProcessingScreen({ isReady, onComplete, locationName }) 
 
         }, 60);
 
-        return () => clearInterval(timer);
+        return () => {
+            clearInterval(timer);
+            clearTimeout(failsafe);
+        };
     }, [progress, isReady, onComplete]);
 
     return (

@@ -54,11 +54,16 @@ export default function App() {
         let resultTimestamp = '';
         let resultStatus = 'VENOMOUS';
 
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
         try {
             const response = await fetch(`${API_BASE_URL}/detect`, {
                 method: 'POST',
                 body: formData,
+                signal: controller.signal
             });
+            clearTimeout(timeoutId);
 
             if (response.ok) {
                 const data = await response.json();
@@ -100,9 +105,15 @@ export default function App() {
     };
 
     const handleProcessingComplete = useCallback(() => {
-        if (!isReady) return; // Prevent transition if API failed
         setScreen(hasSnake ? 'snake-detected' : 'all-clear');
-    }, [hasSnake, isReady]);
+    }, [hasSnake]);
+
+    // AUTO-TRANSITION when API is ready and we are on processing screen
+    useEffect(() => {
+        if (isReady && screen === 'processing') {
+            handleProcessingComplete();
+        }
+    }, [isReady, screen, handleProcessingComplete]);
 
     const handleLogTamper = () => {
         const ts = new Date().toLocaleString();
