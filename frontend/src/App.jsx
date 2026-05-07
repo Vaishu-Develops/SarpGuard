@@ -75,36 +75,34 @@ export default function App() {
                 }
 
                 resultConfidence = data.confidence || 0;
-
                 resultHasSnake = data.status && data.status.toUpperCase() !== 'NO SNAKE DETECTED';
                 resultStatus = data.status.toUpperCase();
                 resultImagePath = data.image_path ? `${API_BASE_URL}${data.image_path}` : '';
                 resultTimestamp = data.timestamp || '';
+                
+                setHasSnake(resultHasSnake);
+                setConfidence(resultConfidence);
+                setSnakeStatus(resultStatus);
+                setImagePath(resultImagePath);
+                setApiTimestamp(resultTimestamp);
+                setAnalysisTime(Math.round((Date.now() - startTime) / 1000) || 1);
+                setIsReady(true); // Only set ready on success
             } else {
                 console.error("API Response not OK");
+                setScreen('upload');
+                alert("Security Server returned an error. Please try again.");
             }
         } catch (err) {
             console.error("Fetch failed", err);
+            setScreen('upload');
+            alert("Connection to Security Server lost. Please check your internet or wait for server to reboot.");
         }
-
-        // If fallback needed (no API running), mock data safely
-        if (!resultTimestamp) {
-            const now = new Date();
-            resultTimestamp = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')} ${now.getHours() >= 12 ? 'PM' : 'AM'}`;
-        }
-
-        setHasSnake(resultHasSnake);
-        setConfidence(resultConfidence);
-        setSnakeStatus(resultStatus);
-        setImagePath(resultImagePath);
-        setApiTimestamp(resultTimestamp);
-        setAnalysisTime(Math.round((Date.now() - startTime) / 1000) || 1);
-        setIsReady(true);
     };
 
     const handleProcessingComplete = useCallback(() => {
+        if (!isReady) return; // Prevent transition if API failed
         setScreen(hasSnake ? 'snake-detected' : 'all-clear');
-    }, [hasSnake]);
+    }, [hasSnake, isReady]);
 
     const handleLogTamper = () => {
         const ts = new Date().toLocaleString();

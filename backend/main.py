@@ -149,18 +149,26 @@ async def detect(
                 print(f"[Main] Rejected detection as false positive. Classifier confidence too low: {confidence:.1f}%")
                 return {"status": "No Snake Detected", "confidence": 0.0, "image_path": "", "alert_sent": False, "timestamp": readable_timestamp}
             
-            alert_sent = send_whatsapp_alert(location, confidence, status)
+            # 3. Alert Logic (Wrapped in try/except to prevent server crash)
+            try:
+                alert_sent = send_whatsapp_alert(location, confidence, status)
+            except Exception as e:
+                print(f"[Alert Error] {e}")
+                alert_sent = False
             
             # 4. Save history
-            record = {
-                "id": uid,
-                "timestamp": readable_timestamp,
-                "location": location,
-                "status": status,
-                "confidence": confidence,
-                "image_path": f"/images/detected_{timestamp_str}_{uid}.jpg"
-            }
-            save_detection(record)
+            try:
+                record = {
+                    "id": uid,
+                    "timestamp": readable_timestamp,
+                    "location": location,
+                    "status": status,
+                    "confidence": confidence,
+                    "image_path": f"/images/detected_{timestamp_str}_{uid}.jpg"
+                }
+                save_detection(record)
+            except Exception as e:
+                print(f"[History Error] {e}")
             
             return {
                 "status": status, 
