@@ -236,16 +236,16 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
             const x = box.x - (w / 2);
             const y = box.y - (h / 2);
 
-            ctx.strokeStyle = '#F43F5E'; // Red
-            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#F43F5E'; // Bright Red
+            ctx.lineWidth = 6; // Thicker for visibility
             ctx.shadowColor = '#F43F5E';
-            ctx.shadowBlur = 10;
+            ctx.shadowBlur = 15;
             ctx.strokeRect(x, y, w, h);
 
             ctx.fillStyle = '#F43F5E';
             ctx.shadowBlur = 0;
-            ctx.font = 'bold 13px monospace';
-            ctx.fillText(`🐍 SNAKE ${(box.confidence * 100).toFixed(1)}%`, x + 4, y - 6);
+            ctx.font = 'bold 20px monospace'; // Larger font
+            ctx.fillText(`🐍 SNAKE ${(box.confidence * 100).toFixed(1)}%`, x + 5, y - 10);
         });
 
         // --- Draw DEVICE / SPOOF boxes (amber, absolute xyxy coords from YOLO)
@@ -353,8 +353,18 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
                                 <p>{'>'} INITIALIZING CONNECTION...</p>
                                 <p className="text-safe">{'>'} NEURAL NET ONLINE.</p>
                                 <p>{'>'} AWAITING VISUAL FEED FOR ANALYSIS.</p>
+                                {isLiveDetecting && (
+                                    <p className={liveDetections.length > 0 ? "text-red-400 animate-pulse" : "text-safe"}>
+                                        {'>'} LIVE STATUS: {liveDetections.length} SNAKE(S) DETECTED
+                                    </p>
+                                )}
+                                {liveSpoofAlert && (
+                                    <p className="text-yellow-400">
+                                        {'>'} ALERT: SPOOFING DETECTED ({liveSpoofAlert.reason})
+                                    </p>
+                                )}
                                 <p className={file ? "text-processing" : "text-slate-500"}>
-                                    {'>'} {file ? `FILE LOADED: ${file.name}` : "NO FEED DETECTED."}
+                                    {'>'} {file ? `FILE LOADED: ${file.name}` : "READY FOR INPUT."}
                                 </p>
                             </div>
                         </div>
