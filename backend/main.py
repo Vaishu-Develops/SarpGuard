@@ -34,10 +34,18 @@ app.add_middleware(
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):
-    print(f"[DEBUG] 422 Validation Error: {exc.errors()}", flush=True)
+    # Convert errors to a serializable format (strings)
+    error_details = []
+    for error in exc.errors():
+        error_details.append({
+            "loc": error["loc"],
+            "msg": error["msg"],
+            "type": error["type"]
+        })
+    print(f"[DEBUG] 422 Validation Error: {error_details}", flush=True)
     return JSONResponse(
         status_code=422,
-        content={"detail": exc.errors(), "body": str(exc.body)},
+        content={"detail": error_details, "body": str(exc.body)},
     )
 
 # Ensure images directory exists
