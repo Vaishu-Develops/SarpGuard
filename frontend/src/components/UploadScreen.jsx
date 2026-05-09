@@ -13,7 +13,7 @@ const LOCATIONS = [
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-export default function UploadScreen({ onAnalyze, file, setFile, location, setLocation }) {
+export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, file, setFile, location, setLocation }) {
     const fileInputRef = useRef(null);
     const webcamRef = useRef(null);
     const mediaRecorderRef = useRef(null);
@@ -157,14 +157,10 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
 
                 if (response.ok) {
                     const data = await response.json();
-                    const snakeBoxes = data.boxes || [];
+                    const snakeBoxes = data.snake_boxes || data.boxes || [];
 
                     setLiveDetections(snakeBoxes);
-
-                    // Merge fresh device boxes from slow response too (in case fast poll missed)
-                    if (data.device_boxes && data.device_boxes.length > 0) {
-                        setLiveDeviceBoxes(prev => data.device_boxes.length > prev.length ? data.device_boxes : prev);
-                    }
+                    setLiveDeviceBoxes(data.device_boxes || []);
 
                     // Static snake detection
                     if (data.detected && snakeBoxes.length > 0) {
@@ -183,16 +179,26 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
 
                     // AUTO-TRIGGER: only if snake found AND NOT a spoof
                     if (data.detected && snakeBoxes.length > 0 && !data.spoof_detected && location && !hasTriggeredRef.current) {
-                        const validThreat = snakeBoxes.some(b => b.confidence > 0.40);
-                        if (validThreat) {
-                            hasTriggeredRef.current = true;
-                            setIsLiveDetecting(false);
-                            const fetchRes = await fetch(imageSrc);
-                            const blob = await fetchRes.blob();
-                            const frameFile = new File([blob], `live_threat_${Date.now()}.jpg`, { type: 'image/jpeg' });
-                            setFile(frameFile);
-                            onAnalyze(frameFile);
+                        hasTriggeredRef.current = true;
+                        setIsLiveDetecting(false);
+
+                        if (onLiveSnakeDetected) {
+                            const snapshot = webcamRef.current.getScreenshot();
+                            onLiveSnakeDetected({
+                                imagePath: snapshot || imageSrc,
+                                confidence: data.confidence || 0,
+                                timestamp: new Date().toLocaleTimeString(),
+                                status: data.status || 'SNAKE DETECTED',
+                                locationName: location,
+                            });
+                            return;
                         }
+
+                        const fetchRes = await fetch(imageSrc);
+                        const blob = await fetchRes.blob();
+                        const frameFile = new File([blob], `live_threat_${Date.now()}.jpg`, { type: 'image/jpeg' });
+                        setFile(frameFile);
+                        onAnalyze(frameFile);
                     }
                 }
             } catch (err) {
@@ -213,7 +219,7 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
         }
 
         return () => { if (intervalId) clearInterval(intervalId); };
-    }, [isLiveDetecting, isCameraActive, location]);
+    }, [isLiveDetecting, isCameraActive, location, onAnalyze, onLiveSnakeDetected, setFile]);
 
     // Draw bounding boxes when detection state changes
     useEffect(() => {
