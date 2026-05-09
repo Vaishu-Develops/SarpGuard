@@ -117,6 +117,14 @@ export default function App() {
         setScreen('snake-detected');
     }, []);
 
+    const handleLiveSpoofDetected = useCallback((payload) => {
+        setSpoofReason(payload.reason || 'Screen/device detected');
+        setConfidence(Number(payload.confidence) || 0);
+        setApiTimestamp(payload.timestamp || new Date().toLocaleTimeString());
+        setIsReady(false);
+        setScreen('spoof-detected');
+    }, []);
+
     const handleProcessingComplete = useCallback(() => {
         setScreen(hasSnake ? 'snake-detected' : 'all-clear');
     }, [hasSnake]);
@@ -158,6 +166,7 @@ export default function App() {
                 <UploadScreen
                     onAnalyze={handleAnalyze}
                     onLiveSnakeDetected={handleLiveSnakeDetected}
+                    onLiveSpoofDetected={handleLiveSpoofDetected}
                     file={file}
                     setFile={setFile}
                     location={location}
