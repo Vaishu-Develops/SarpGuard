@@ -203,23 +203,17 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
                         hasTriggeredRef.current = true;
                         setIsLiveDetecting(false);
 
-                        if (onLiveSnakeDetected) {
-                            const snapshot = webcamRef.current.getScreenshot();
-                            onLiveSnakeDetected({
-                                imagePath: snapshot || imageSrc,
-                                confidence: data.confidence || 0,
-                                timestamp: new Date().toLocaleTimeString(),
-                                status: data.status || 'SNAKE DETECTED',
-                                locationName: location,
-                            });
-                            return;
-                        }
-
-                        const fetchRes = await fetch(imageSrc);
+                        const snapshot = webcamRef.current.getScreenshot();
+                        const imageToUse = snapshot || imageSrc;
+                        const fetchRes = await fetch(imageToUse);
                         const blob = await fetchRes.blob();
                         const frameFile = new File([blob], `live_threat_${Date.now()}.jpg`, { type: 'image/jpeg' });
+
                         setFile(frameFile);
-                        onAnalyze(frameFile);
+
+                        if (onAnalyze) {
+                            await onAnalyze(frameFile);
+                        }
                     }
                 }
             } catch (err) {

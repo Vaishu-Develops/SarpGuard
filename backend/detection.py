@@ -512,7 +512,8 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
 def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float, list, bool, str]:
     """
     Processes a single live webcam frame encoded as base64.
-    Runs snake detection (Roboflow) + device detection (YOLOv8) + static tracker in parallel.
+    Runs snake detection (Roboflow) for low-latency live overlays.
+    Device / spoof detection is handled separately by /detect-device so the snake box can appear faster.
     
     Returns:
         detected (bool): Snake found
@@ -540,10 +541,8 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
             print("[Live Detection] Failed to decode base64 frame.")
             return False, [], None, 0.0, [], False, ""
 
-        # --- Parallel processing ---
+        # --- Fast path: snake detection only ---
         snake_result = [False, [], 0.0]  # [detected, boxes, max_conf]
-        device_result = []               # list of device box dicts
-        artifact_result = [False, 0.0, ""]
 
         def run_snake_detection():
             try:
@@ -589,75 +588,14 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
             except Exception as e:
                 print(f"[Live Detection] Snake detection error: {e}")
 
-        def run_device_detection():
-            try:
-                # Reduced imgsz to 320 for live tracking efficiency
-                results = get_device_model().predict(frame, classes=DEVICE_CLASSES, verbose=False, imgsz=320)
-                for box in results[0].boxes:
-                    xyxy = box.xyxy[0].cpu().numpy().tolist()
-                    cls = int(box.cls[0].cpu().item())
-                    conf = float(box.conf[0].cpu().item())
-                    if conf > 0.25: # Lowered from 0.35
-                        label = DEVICE_CLASS_NAMES.get(cls, f"Device({cls})")
-                        device_result.append({
-                            "x1": xyxy[0], "y1": xyxy[1],
-                            "x2": xyxy[2], "y2": xyxy[3],
-                            "confidence": conf,
-                            "label": label,
-                            "type": "device"
-                        })
-            except Exception as e:
-                print(f"[Live Detection] Device detection error: {e}")
-
-        def run_artifact_detection():
-            artifact_result[0], artifact_result[1], artifact_result[2] = detect_screen_artifact(frame)
-
         # Priority 1: Detect Snakes (Fastest feedback for UI)
         run_snake_detection()
-        
-        # Priority 2: Anti-Spoofing (YOLO and Artifacts)
-        run_device_detection()
-        run_artifact_detection()
 
         detected, snake_boxes, max_conf = snake_result
-        is_artifact, art_score, art_reason = artifact_result
 
-        # Correlate: does any snake box overlap a device box? Or is there an artifact?
-        spoof_detected = False
-        spoof_reasons = []
-
-        if is_artifact:
-            spoof_detected = True
-            spoof_reasons.append(art_reason)
-
-        if len(device_result) > 0:
-            # Report devices found even if they don't overlap a snake
-            # (Provides more feedback to the user)
-            for dbox in device_result:
-                if not spoof_detected: # only add one general reason if we don't have one
-                    spoof_detected = True
-                spoof_reasons.append(f"Detected '{dbox['label']}'")
-
-        if detected:
-            for sbox in snake_boxes:
-                sx1 = sbox["x"] - sbox["width"] / 2
-                sy1 = sbox["y"] - sbox["height"] / 2
-                sx2 = sbox["x"] + sbox["width"] / 2
-                sy2 = sbox["y"] + sbox["height"] / 2
-                snake_xyxy = [sx1, sy1, sx2, sy2]
-
-        # Ensure boxes are normalized to frame size if Roboflow returned them in a different scale
-        # (This fixes the 'not working accurately' alignment issue)
-        h, w = frame.shape[:2]
-        for box in snake_boxes:
-            # If Roboflow coordinates are larger than frame, it means it used a different internal scale
-            # We keep them as-is if they are within 0-w and 0-h, otherwise we'd need to scale.
-            # But the Draw Engine expects % or pixels based on the canvas.
-            pass
-
-        spoof_reason_str = " | ".join(spoof_reasons) if spoof_reasons else ""
-        print(f"[Live Detection] snake={detected} conf={max_conf:.2f} devices={len(device_result)} spoof={spoof_detected}")
-        return detected, snake_boxes, frame, max_conf, device_result, spoof_detected, spoof_reason_str
+        # Keep the live response lean. Device/spoof checks run on /detect-device.
+        print(f"[Live Detection] snake={detected} conf={max_conf:.2f}")
+        return detected, snake_boxes, frame, max_conf, [], False, ""
         
     except Exception as e:
         print(f"[Live Detection] Error processing frame: {e}")
