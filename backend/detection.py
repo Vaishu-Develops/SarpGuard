@@ -1,11 +1,9 @@
-import cv2
-import threading
 import os
+import threading
 import numpy as np
 import subprocess
 from inference_sdk import InferenceHTTPClient
 from dotenv import load_dotenv
-import supervision as sv
 
 load_dotenv()
 
@@ -59,7 +57,6 @@ def get_roboflow_client():
     return _client
 
 # Lazy-loaded models (loaded on first use so server port opens immediately)
-from ultralytics import YOLO
 import threading
 
 _device_model = None
@@ -76,6 +73,7 @@ def get_device_model():
                 return _device_model
                 
             # Use absolute path based on this file's location
+            from ultralytics import YOLO
             _MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model", "yolov8n.pt")
             if not os.path.exists(_MODEL_PATH):
                 _MODEL_PATH = "yolov8n.pt"  # fallback: auto-download
@@ -338,6 +336,7 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
             if predictions:
                 print(f"[Detection] Frame {idx}: Raw Predictions: {predictions}")
                 # Convert Roboflow predictions to supervision Detections format
+                import supervision as sv
                 boxes = []
                 confidences = []
                 for pred in predictions:
@@ -513,6 +512,7 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
         spoof_reason (str): Reason string
     """
     import base64
+    import cv2
     
     # Strip base64 prefix if present
     if "base64," in base64_data:
