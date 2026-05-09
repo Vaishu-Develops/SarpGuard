@@ -3,7 +3,7 @@ import threading
 import cv2
 import numpy as np
 import subprocess
-from inference_sdk import InferenceHTTPClient
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -52,6 +52,7 @@ def get_roboflow_client():
             api_key = os.getenv("ROBOFLOW_API_KEY")
             if not api_key:
                 print("[CRITICAL] ROBOFLOW_API_KEY is missing!")
+            from inference_sdk import InferenceHTTPClient
             _client = InferenceHTTPClient(
                 api_url="https://serverless.roboflow.com",
                 api_key=api_key

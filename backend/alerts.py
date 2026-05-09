@@ -1,5 +1,5 @@
 import os
-from twilio.rest import Client
+
 from dotenv import load_dotenv, dotenv_values
 
 from datetime import datetime
@@ -33,6 +33,7 @@ def send_whatsapp_alert(location: str, confidence: float, status: str, mock: boo
     
     try:
         print(f"[WhatsApp] 🔄 Creating Twilio client and sending message...")
+        from twilio.rest import Client
         client = Client(account_sid, auth_token)
         
         current_time = datetime.now().strftime("%d-%b-%Y %I:%M %p")
@@ -77,6 +78,7 @@ def send_tamper_alert(location: str, spoof_confidence: float, reason: str) -> bo
         return True
     
     try:
+        from twilio.rest import Client
         client = Client(account_sid, auth_token)
         current_time = datetime.now().strftime("%d-%b-%Y %I:%M %p")
         
