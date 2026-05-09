@@ -60,6 +60,10 @@ def get_roboflow_client():
             print(f"[Info] Roboflow Client initialized (API Key present: {bool(api_key)})")
     return _client
 
+
+        def roboflow_infer(image_path: str):
+            return get_roboflow_client().infer(image_path, model_id=DETECTION_MODEL_ID)
+
 # Lazy-loaded models (loaded on first use so server port opens immediately)
 import threading
 
@@ -137,6 +141,7 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
 
     spoof_artifact_result = [False, 0.0, ""]
     spoof_device_boxes = []
+    predictions = []
 
     def run_artifact_check():
         spoof_artifact_result[0], spoof_artifact_result[1], spoof_artifact_result[2] = detect_screen_artifact(frame)
@@ -155,19 +160,15 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
     run_artifact_check()
     run_device_check()
 
-    # Run Roboflow detection on the image
     try:
-        result = CLIENT.infer(image_path, model_id=DETECTION_MODEL_ID)
+        result = roboflow_infer(image_path)
         predictions = result.get("predictions", [])
         print(f"[Detection] Image: {len(predictions)} predictions found")
     except Exception as e:
         print(f"[Detection] Roboflow ERROR: {e}")
         import traceback
         traceback.print_exc()
-        t1.join(); t2.join()
         return False, 0.0, "", False, ""
-
-    t1.join(); t2.join()
 
     if not predictions:
         print("[Detection] No snake found in image. Checking for spoofing anyway...")
@@ -332,7 +333,7 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
 
         # In parallel, main thread runs snake detection
         try:
-            result = CLIENT.infer(temp_image_path, model_id=DETECTION_MODEL_ID)
+            result = roboflow_infer(temp_image_path)
             predictions = result.get("predictions", [])
             print(f"[Detection] Frame {idx}: {len(predictions)} predictions found")
 
