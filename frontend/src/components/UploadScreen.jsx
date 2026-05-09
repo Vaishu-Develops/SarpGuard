@@ -202,7 +202,7 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
 
         if (isLiveDetecting && isCameraActive && !hasTriggeredRef.current) {
             detectSnake(); // run immediately on enable
-            intervalId = setInterval(detectSnake, 2000); // 2s intervals
+            intervalId = setInterval(detectSnake, 500); // Increased to 500ms for instant feel
         } else {
             setLiveDetections([]);
             setStaticWarning(false);
@@ -213,7 +213,7 @@ export default function UploadScreen({ onAnalyze, file, setFile, location, setLo
         }
 
         return () => { if (intervalId) clearInterval(intervalId); };
-    }, [isLiveDetecting, isCameraActive]);
+    }, [isLiveDetecting, isCameraActive, location]);
 
     // Draw bounding boxes when detection state changes
     useEffect(() => {
