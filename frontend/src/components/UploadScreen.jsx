@@ -19,6 +19,11 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
     const mediaRecorderRef = useRef(null);
     const canvasRef = useRef(null);
     const hasTriggeredRef = useRef(false);
+    const liveSnakeRequestInFlightRef = useRef(false);
+    const liveDeviceRequestInFlightRef = useRef(false);
+    const motionLoopRafRef = useRef(null);
+    const motionThrottleRef = useRef(0);
+    const motionPreviousFrameRef = useRef(null);
 
     const [isCameraActive, setIsCameraActive] = useState(false);
     const [capturing, setCapturing] = useState(false);
@@ -28,6 +33,7 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
     const [liveDetections, setLiveDetections] = useState([]);
     const [liveDeviceBoxes, setLiveDeviceBoxes] = useState([]);
     const [liveSpoofAlert, setLiveSpoofAlert] = useState(null); // null | { detected: bool, reason: string }
+    const [motionBox, setMotionBox] = useState(null);
     // Static snake tracking: track frames where a snake was found but didn't move
     const snakePositionHistoryRef = useRef([]);
     const [staticWarning, setStaticWarning] = useState(false);
@@ -109,10 +115,16 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
             return;
         }
 
+        if (liveDeviceRequestInFlightRef.current) {
+            return;
+        }
+
         const detectDevice = async () => {
             if (!webcamRef.current) return;
             const imageSrc = webcamRef.current.getScreenshot();
             if (!imageSrc) return;
+            if (liveDeviceRequestInFlightRef.current) return;
+            liveDeviceRequestInFlightRef.current = true;
             try {
                 const res = await fetch(`${API_BASE_URL}/detect-device`, {
                     method: "POST",
@@ -140,12 +152,115 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
                 }
             } catch (err) {
                 console.error("Device detection error:", err);
+            } finally {
+                liveDeviceRequestInFlightRef.current = false;
             }
         };
 
         detectDevice(); // run immediately on enable
-        const deviceInterval = setInterval(detectDevice, 1000);
+        const deviceInterval = setInterval(detectDevice, 1500);
         return () => clearInterval(deviceInterval);
+    }, [isLiveDetecting, isCameraActive]);
+
+    // Instant motion box for any object entering the webcam frame
+    useEffect(() => {
+        if (!isLiveDetecting || !isCameraActive) {
+            setMotionBox(null);
+            motionPreviousFrameRef.current = null;
+            if (motionLoopRafRef.current) {
+                cancelAnimationFrame(motionLoopRafRef.current);
+                motionLoopRafRef.current = null;
+            }
+            return;
+        }
+
+        const scanMotion = () => {
+            const video = webcamRef.current?.video;
+            if (!video || video.readyState < 2) {
+                motionLoopRafRef.current = requestAnimationFrame(scanMotion);
+                return;
+            }
+
+            const now = performance.now();
+            if (now - motionThrottleRef.current < 120) {
+                motionLoopRafRef.current = requestAnimationFrame(scanMotion);
+                return;
+            }
+            motionThrottleRef.current = now;
+
+            const sampleWidth = 160;
+            const sampleHeight = 90;
+            const offscreen = document.createElement('canvas');
+            offscreen.width = sampleWidth;
+            offscreen.height = sampleHeight;
+            const ctx = offscreen.getContext('2d', { willReadFrequently: true });
+            if (!ctx) {
+                motionLoopRafRef.current = requestAnimationFrame(scanMotion);
+                return;
+            }
+
+            ctx.drawImage(video, 0, 0, sampleWidth, sampleHeight);
+            const imageData = ctx.getImageData(0, 0, sampleWidth, sampleHeight).data;
+
+            if (!motionPreviousFrameRef.current) {
+                motionPreviousFrameRef.current = new Uint8ClampedArray(imageData);
+                motionLoopRafRef.current = requestAnimationFrame(scanMotion);
+                return;
+            }
+
+            let minX = sampleWidth;
+            let minY = sampleHeight;
+            let maxX = 0;
+            let maxY = 0;
+            let changedPixels = 0;
+
+            for (let y = 0; y < sampleHeight; y += 2) {
+                for (let x = 0; x < sampleWidth; x += 2) {
+                    const index = (y * sampleWidth + x) * 4;
+                    const prev = motionPreviousFrameRef.current;
+                    const currentLuma = (imageData[index] + imageData[index + 1] + imageData[index + 2]) / 3;
+                    const previousLuma = (prev[index] + prev[index + 1] + prev[index + 2]) / 3;
+                    const diff = Math.abs(currentLuma - previousLuma);
+
+                    if (diff > 28) {
+                        changedPixels += 1;
+                        if (x < minX) minX = x;
+                        if (y < minY) minY = y;
+                        if (x > maxX) maxX = x;
+                        if (y > maxY) maxY = y;
+                    }
+                }
+            }
+
+            motionPreviousFrameRef.current = new Uint8ClampedArray(imageData);
+
+            if (changedPixels > 80 && maxX > minX && maxY > minY) {
+                const canvasWidth = video.videoWidth || 1;
+                const canvasHeight = video.videoHeight || 1;
+                const scaleX = canvasWidth / sampleWidth;
+                const scaleY = canvasHeight / sampleHeight;
+
+                setMotionBox({
+                    x: minX * scaleX,
+                    y: minY * scaleY,
+                    width: (maxX - minX) * scaleX,
+                    height: (maxY - minY) * scaleY,
+                });
+            } else {
+                setMotionBox(null);
+            }
+
+            motionLoopRafRef.current = requestAnimationFrame(scanMotion);
+        };
+
+        motionLoopRafRef.current = requestAnimationFrame(scanMotion);
+
+        return () => {
+            if (motionLoopRafRef.current) {
+                cancelAnimationFrame(motionLoopRafRef.current);
+                motionLoopRafRef.current = null;
+            }
+        };
     }, [isLiveDetecting, isCameraActive]);
 
     // LOOP 2: Slower snake detection via Roboflow (2.5s) — auto-triggers on real snake
@@ -154,9 +269,11 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
 
         const detectSnake = async () => {
             if (!webcamRef.current || !isLiveDetecting) return;
+            if (liveSnakeRequestInFlightRef.current) return;
 
             const imageSrc = webcamRef.current.getScreenshot();
             if (!imageSrc) return;
+            liveSnakeRequestInFlightRef.current = true;
 
             try {
                 const response = await fetch(`${API_BASE_URL}/detect-live`, {
@@ -215,18 +332,23 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
                             await onAnalyze(frameFile);
                         }
                     }
+                } else {
+                    console.warn(`Live snake detection failed with status ${response.status}`);
                 }
             } catch (err) {
                 console.error("Snake detection error:", err);
+            } finally {
+                liveSnakeRequestInFlightRef.current = false;
             }
         };
 
         if (isLiveDetecting && isCameraActive && !hasTriggeredRef.current) {
             detectSnake(); // run immediately on enable
-            intervalId = setInterval(detectSnake, 500); // Increased to 500ms for instant feel
+            intervalId = setInterval(detectSnake, 1200);
         } else {
             setLiveDetections([]);
             setStaticWarning(false);
+            setMotionBox(null);
             if (canvasRef.current) {
                 const ctx = canvasRef.current.getContext('2d');
                 ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
@@ -291,6 +413,22 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
             ctx.fillText(`⚠ ${box.label} ${(box.confidence * 100).toFixed(0)}%`, x + 4, y - 7);
         });
 
+        // --- Draw instant motion box for early feedback before backend confirmation
+        if (motionBox) {
+            ctx.strokeStyle = '#22C55E';
+            ctx.lineWidth = 4;
+            ctx.shadowColor = '#22C55E';
+            ctx.shadowBlur = 14;
+            ctx.strokeRect(motionBox.x, motionBox.y, motionBox.width, motionBox.height);
+
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = 'rgba(34,197,94,0.9)';
+            ctx.fillRect(motionBox.x, Math.max(0, motionBox.y - 22), 150, 20);
+            ctx.fillStyle = '#000';
+            ctx.font = 'bold 12px monospace';
+            ctx.fillText('MOTION DETECTED', motionBox.x + 4, Math.max(12, motionBox.y - 7));
+        }
+
         // --- HEARTBEAT / DEBUG DOT (shows the canvas is actually rendering)
         if (isLiveDetecting) {
             ctx.fillStyle = '#10B981'; // Emerald Green
@@ -298,7 +436,7 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
             ctx.fillText(`● DRAW_ENGINE_ACTIVE [${canvas.width}x${canvas.height}]`, 15, canvas.height - 15);
         }
 
-    }, [liveDetections, liveDeviceBoxes]);
+    }, [liveDetections, liveDeviceBoxes, motionBox]);
 
     return (
         <div className="w-full h-full min-h-screen p-4 md:p-8 flex flex-col justify-center items-center relative z-10">
