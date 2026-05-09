@@ -61,8 +61,8 @@ def get_roboflow_client():
     return _client
 
 
-        def roboflow_infer(image_path: str):
-            return get_roboflow_client().infer(image_path, model_id=DETECTION_MODEL_ID)
+def roboflow_infer(image_path: str):
+    return get_roboflow_client().infer(image_path, model_id=DETECTION_MODEL_ID)
 
 # Lazy-loaded models (loaded on first use so server port opens immediately)
 import threading
