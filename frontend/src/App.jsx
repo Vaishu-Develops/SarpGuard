@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import UploadScreen from './components/UploadScreen';
 import ProcessingScreen from './components/ProcessingScreen';
 import SnakeDetectedScreen from './components/SnakeDetectedScreen';
