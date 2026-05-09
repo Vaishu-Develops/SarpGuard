@@ -89,6 +89,7 @@ def get_byte_tracker():
     """Lazy-load ByteTrack on first use."""
     global _byte_tracker
     if _byte_tracker is None:
+        import supervision as sv
         _byte_tracker = sv.ByteTrack()
     return _byte_tracker
 
@@ -228,7 +229,7 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
 
     return True, conf, final_crop_path, is_spoof, " | ".join(spoof_reasons)
 
-def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, max_samples: int = 20) -> tuple[bool, float, str, bool, str]:
+def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, max_samples: int = 10) -> tuple[bool, float, str, bool, str]:
     """
     Samples multiple frames from the video, runs Roboflow snake-detection/2 detection,
     uses ByteTrack to track snake movement across frames.
@@ -316,11 +317,17 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
                 if conf > 0.3: # Lowered from 0.4
                     spoof_device_boxes.append({"box": xyxy, "cls": cls, "conf": conf})
 
-        # Start background threads for anti-spoof checks
-        thread_artifacts = threading.Thread(target=run_artifact_check)
-        thread_devices = threading.Thread(target=run_device_check)
-        thread_artifacts.start()
-        thread_devices.start()
+        # Start background threads for anti-spoof checks (only every 3rd frame to save time)
+        do_spoof_check = (idx % 3 == 0) or (idx == frame_indices[0]) or (idx == frame_indices[-1])
+        
+        thread_artifacts = None
+        thread_devices = None
+        
+        if do_spoof_check:
+            thread_artifacts = threading.Thread(target=run_artifact_check)
+            thread_devices = threading.Thread(target=run_device_check)
+            thread_artifacts.start()
+            thread_devices.start()
 
         # In parallel, main thread runs snake detection
         try:
@@ -329,8 +336,8 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
             print(f"[Detection] Frame {idx}: {len(predictions)} predictions found")
 
             # Wait for anti-spoof checks to finish before evaluating the frame's results
-            thread_artifacts.join()
-            thread_devices.join()
+            if thread_artifacts: thread_artifacts.join()
+            if thread_devices: thread_devices.join()
 
             has_snake = False
             top_snake_pred = None
