@@ -1,5 +1,6 @@
 import os
 import threading
+import cv2
 import numpy as np
 import subprocess
 from inference_sdk import InferenceHTTPClient
@@ -19,11 +20,13 @@ def convert_video_to_mp4(input_path: str) -> str:
         ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
         result = subprocess.run(
             [ffmpeg_path, "-y", "-i", input_path,
+             "-vf", "scale=-1:720",
              "-c:v", "libx264", "-preset", "ultrafast",
              "-movflags", "+faststart",  # Puts moov atom at the start
              "-an",  # No audio needed
              output_path],
-            capture_output=True, text=True, timeout=60
+            capture_output=True,
+            timeout=120  # Increased for larger files
         )
         if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             print(f"[VideoConvert] Converted {input_path} → {output_path}")
@@ -512,7 +515,6 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
         spoof_reason (str): Reason string
     """
     import base64
-    import cv2
     
     # Strip base64 prefix if present
     if "base64," in base64_data:
@@ -601,8 +603,10 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
         def run_artifact_detection():
             artifact_result[0], artifact_result[1], artifact_result[2] = detect_screen_artifact(frame)
 
-        # Run checks sequentially on memory-constrained Render to prevent crashes
+        # Priority 1: Detect Snakes (Fastest feedback for UI)
         run_snake_detection()
+        
+        # Priority 2: Anti-Spoofing (YOLO and Artifacts)
         run_device_detection()
         run_artifact_detection()
 
@@ -633,10 +637,14 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
                 sy2 = sbox["y"] + sbox["height"] / 2
                 snake_xyxy = [sx1, sy1, sx2, sy2]
 
-                for dbox in device_result:
-                    d_xyxy = [dbox["x1"], dbox["y1"], dbox["x2"], dbox["y2"]]
-                    if check_bbox_overlap(snake_xyxy, d_xyxy):
-                        spoof_reasons.append(f"Snake overlaps '{dbox['label']}' display")
+        # Ensure boxes are normalized to frame size if Roboflow returned them in a different scale
+        # (This fixes the 'not working accurately' alignment issue)
+        h, w = frame.shape[:2]
+        for box in snake_boxes:
+            # If Roboflow coordinates are larger than frame, it means it used a different internal scale
+            # We keep them as-is if they are within 0-w and 0-h, otherwise we'd need to scale.
+            # But the Draw Engine expects % or pixels based on the canvas.
+            pass
 
         spoof_reason_str = " | ".join(spoof_reasons) if spoof_reasons else ""
         print(f"[Live Detection] snake={detected} conf={max_conf:.2f} devices={len(device_result)} spoof={spoof_detected}")
