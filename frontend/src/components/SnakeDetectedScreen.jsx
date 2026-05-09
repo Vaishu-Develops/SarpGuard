@@ -3,6 +3,10 @@ import { AlertTriangle, Crosshair, MapPin, Clock, CheckCircle2, Terminal } from 
 
 export default function SnakeDetectedScreen({ onReset, locationName, confidence, timestamp, imagePath, status = 'VENOMOUS' }) {
     const isHarmless = status === 'HARMLESS';
+    const alertTitle = isHarmless ? 'SYSTEM NOTIFICATION: SNAKE DETECTED' : 'CRITICAL ALERT: THREAT DETECTED';
+    const alertSubtitle = isHarmless
+        ? 'NON-VENOMOUS (HARMLESS) SPECIMEN IDENTIFIED. SECURITY NOTIFIED.'
+        : 'LIVE SNAKE DETECTED. DO NOT APPROACH AREA.';
 
     // Theme configurations based on threat level
     const themeColor = isHarmless ? 'amber-500' : 'danger';
@@ -36,10 +40,10 @@ export default function SnakeDetectedScreen({ onReset, locationName, confidence,
                     </div>
                     <div className="flex-1">
                         <h1 className={`text-2xl md:text-4xl font-black uppercase tracking-[0.1em] ${themeText} drop-shadow-[0_0_10px_${themeColorHex}]`}>
-                            {isHarmless ? 'SYSTEM NOTIFICATION: SNAKE DETECTED' : 'CRITICAL ALERT: THREAT DETECTED'}
+                            {alertTitle}
                         </h1>
                         <p className={`${themeTextLight} font-mono text-xs md:text-sm mt-2 tracking-widest uppercase`}>
-                            {isHarmless ? 'NON-VENOMOUS (HARMLESS) SPECIMEN IDENTIFIED. SECURITY NOTIFIED.' : 'HIGH-RISK VENOMOUS SPECIMEN. DO NOT APPROACH AREA. SECURITY EN ROUTE.'}
+                            {alertSubtitle}
                         </p>
                     </div>
                 </div>
@@ -152,6 +156,13 @@ export default function SnakeDetectedScreen({ onReset, locationName, confidence,
                             </li>
                         </ul>
                     </div>
+
+                    <button
+                        onClick={onReset}
+                        className="w-full border border-slate-600 bg-surface/80 text-slate-200 py-3 text-[10px] font-mono tracking-[0.25em] uppercase hover:bg-slate-700 transition-colors"
+                    >
+                        CLOSE ALERT
+                    </button>
 
                 </div>
             </div>
