@@ -55,7 +55,9 @@ export default function App() {
         let resultStatus = 'VENOMOUS';
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+        const timeoutId = setTimeout(() => controller.abort(), 60000); // Increased to 60s
+
+        let errorMessage = "Connection to Security Server lost. Please check your internet or wait for server to reboot.";
 
         try {
             const response = await fetch(`${API_BASE_URL}/detect`, {
@@ -67,13 +69,11 @@ export default function App() {
 
             if (response.ok) {
                 const data = await response.json();
-
-                // Check for media spoofing first
+                // ... rest of processing ...
                 if (data.status === 'Media Spoof Detected') {
                     setSpoofReason(data.spoof_reason || 'Screen pixel pattern detected');
                     setConfidence(data.confidence || 0);
-                    const now = new Date();
-                    setApiTimestamp(`${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')} ${now.getHours() >= 12 ? 'PM' : 'AM'}`);
+                    setApiTimestamp(new Date().toLocaleTimeString());
                     setIsReady(false);
                     setScreen('spoof-detected');
                     return;
@@ -91,16 +91,19 @@ export default function App() {
                 setImagePath(resultImagePath);
                 setApiTimestamp(resultTimestamp);
                 setAnalysisTime(Math.round((Date.now() - startTime) / 1000) || 1);
-                setIsReady(true); // Only set ready on success
+                setIsReady(true);
             } else {
-                console.error("API Response not OK");
-                setScreen('upload');
-                alert("Security Server returned an error. Please try again.");
+                errorMessage = `Server Error (${response.status}): The security matrix is temporarily unavailable.`;
+                throw new Error("API Not OK");
             }
         } catch (err) {
+            clearTimeout(timeoutId);
+            if (err.name === 'AbortError') {
+                errorMessage = "Analysis Timeout: The server took too long to respond. Please try a smaller file or better connection.";
+            }
             console.error("Fetch failed", err);
             setScreen('upload');
-            alert("Connection to Security Server lost. Please check your internet or wait for server to reboot.");
+            alert(errorMessage);
         }
     };
 
