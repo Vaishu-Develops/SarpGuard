@@ -107,6 +107,16 @@ export default function App() {
         }
     };
 
+    const handleLiveSnakeDetected = useCallback((payload) => {
+        setHasSnake(true);
+        setConfidence(Number(payload.confidence) || 0);
+        setSnakeStatus(payload.status || 'SNAKE DETECTED');
+        setImagePath(payload.imagePath || '');
+        setApiTimestamp(payload.timestamp || new Date().toLocaleTimeString());
+        setIsReady(false);
+        setScreen('snake-detected');
+    }, []);
+
     const handleProcessingComplete = useCallback(() => {
         setScreen(hasSnake ? 'snake-detected' : 'all-clear');
     }, [hasSnake]);
@@ -127,6 +137,11 @@ export default function App() {
         setFile(null);
         setLocation('');
         setSpoofReason('');
+        setImagePath('');
+        setConfidence(0);
+        setSnakeStatus('VENOMOUS');
+        setHasSnake(false);
+        setIsReady(false);
         setScreen('upload');
     };
 
@@ -142,6 +157,7 @@ export default function App() {
             {screen === 'upload' && (
                 <UploadScreen
                     onAnalyze={handleAnalyze}
+                    onLiveSnakeDetected={handleLiveSnakeDetected}
                     file={file}
                     setFile={setFile}
                     location={location}
