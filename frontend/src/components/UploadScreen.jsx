@@ -13,7 +13,7 @@ const LOCATIONS = [
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, file, setFile, location, setLocation }) {
+export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpoofDetected, file, setFile, location, setLocation }) {
     const fileInputRef = useRef(null);
     const webcamRef = useRef(null);
     const mediaRecorderRef = useRef(null);
@@ -123,7 +123,17 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, file, set
                     const data = await res.json();
                     setLiveDeviceBoxes(data.device_boxes || []);
                     if (data.is_screen) {
-                        setLiveSpoofAlert({ detected: true, reason: data.reason || 'Screen/device detected' });
+                        const spoofReason = data.reason || 'Screen/device detected';
+                        setLiveSpoofAlert({ detected: true, reason: spoofReason });
+                        if (onLiveSpoofDetected && location && !hasTriggeredRef.current) {
+                            hasTriggeredRef.current = true;
+                            setIsLiveDetecting(false);
+                            onLiveSpoofDetected({
+                                reason: spoofReason,
+                                timestamp: new Date().toLocaleTimeString(),
+                                confidence: 0,
+                            });
+                        }
                     } else {
                         setLiveSpoofAlert(null);
                     }
@@ -163,6 +173,17 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, file, set
                     setLiveDeviceBoxes(data.device_boxes || []);
 
                     // Static snake detection
+                    if (data.spoof_detected && !hasTriggeredRef.current && onLiveSpoofDetected) {
+                        hasTriggeredRef.current = true;
+                        setIsLiveDetecting(false);
+                        onLiveSpoofDetected({
+                            reason: data.spoof_reason || 'Screen/device detected',
+                            timestamp: new Date().toLocaleTimeString(),
+                            confidence: data.confidence || 0,
+                        });
+                        return;
+                    }
+
                     if (data.detected && snakeBoxes.length > 0) {
                         const centroid = { x: snakeBoxes[0].x, y: snakeBoxes[0].y };
                         snakePositionHistoryRef.current.push(centroid);
@@ -219,7 +240,7 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, file, set
         }
 
         return () => { if (intervalId) clearInterval(intervalId); };
-    }, [isLiveDetecting, isCameraActive, location, onAnalyze, onLiveSnakeDetected, setFile]);
+    }, [isLiveDetecting, isCameraActive, location, onAnalyze, onLiveSnakeDetected, onLiveSpoofDetected, setFile]);
 
     // Draw bounding boxes when detection state changes
     useEffect(() => {
