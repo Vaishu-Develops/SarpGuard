@@ -196,14 +196,17 @@ async def detect_live(data: LiveFrame):
     For instant device boxes, use /detect-device instead.
     """
     detected, boxes, frame, max_conf, device_boxes, spoof_detected, spoof_reason = detect_snake_frame(data.frame)
+    status = "SNAKE DETECTED" if detected else "NO SNAKE DETECTED"
     
     return {
         "detected": detected,
+        "snake_boxes": boxes,
         "boxes": boxes,
         "device_boxes": device_boxes,
         "spoof_detected": spoof_detected,
         "spoof_reason": spoof_reason,
-        "confidence": round(max_conf * 100, 1)
+        "confidence": round(max_conf * 100, 1),
+        "status": status,
     }
 
 @app.post("/detect-device")
