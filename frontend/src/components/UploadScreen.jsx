@@ -371,6 +371,33 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
         canvas.width = videoWidth;
         canvas.height = videoHeight;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.textBaseline = 'top';
+        ctx.textAlign = 'left';
+        ctx.lineJoin = 'round';
+
+        const drawLabel = (x, y, width, height, label, fillColor, textColor = '#000000') => {
+            const fontSize = Math.max(14, Math.floor(canvas.width / 40));
+            ctx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
+            const textMetrics = ctx.measureText(label);
+            const labelWidth = Math.max(textMetrics.width + 14, 120);
+            const labelHeight = fontSize + 10;
+
+            const fitsAbove = y - labelHeight - 6 > 0;
+            const labelX = Math.max(0, Math.min(canvas.width - labelWidth, x));
+            const labelY = fitsAbove ? y - labelHeight - 6 : Math.min(canvas.height - labelHeight - 4, y + height + 6);
+
+            ctx.fillStyle = fillColor;
+            ctx.fillRect(labelX, labelY, labelWidth, labelHeight);
+            ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(labelX, labelY, labelWidth, labelHeight);
+
+            ctx.fillStyle = textColor;
+            ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+            ctx.lineWidth = 3;
+            ctx.strokeText(label, labelX + 7, labelY + 4);
+            ctx.fillText(label, labelX + 7, labelY + 4);
+        };
 
         // --- Draw SNAKE boxes (Neon style)
         liveDetections.forEach(box => {
@@ -387,19 +414,8 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
             ctx.strokeRect(x, y, w, h);
             ctx.shadowBlur = 0;
 
-            // Adaptive Label Background
-            const fontSize = Math.max(14, Math.floor(canvas.width / 40));
             const label = `🐍 SNAKE ${(box.confidence * 100).toFixed(0)}%`;
-            ctx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
-            const textMetrics = ctx.measureText(label);
-            const labelHeight = fontSize + 8;
-            
-            ctx.fillStyle = '#00FF00';
-            const labelY = y > labelHeight + 5 ? y - 5 : y + labelHeight + 5;
-            ctx.fillRect(x, labelY - labelHeight + 4, textMetrics.width + 12, labelHeight);
-
-            ctx.fillStyle = '#000000';
-            ctx.fillText(label, x + 6, labelY - 4);
+            drawLabel(x, y, w, h, label, '#00FF00');
         });
 
         // --- Draw DEVICE / SPOOF boxes (amber, absolute xyxy coords from YOLO)
@@ -413,17 +429,8 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
             ctx.lineWidth = 3;
             ctx.strokeRect(x, y, w, h);
 
-            // Draw label background
             const labelText = `📱 ${box.label.toUpperCase()} ${(box.confidence * 100).toFixed(0)}%`;
-            ctx.font = 'bold 14px monospace';
-            const textMetrics = ctx.measureText(labelText);
-            
-            ctx.fillStyle = '#F59E0B';
-            const labelY = y > 20 ? y - 5 : y + 18;
-            ctx.fillRect(x, labelY - 15, textMetrics.width + 8, 18);
-
-            ctx.fillStyle = '#000000';
-            ctx.fillText(labelText, x + 4, labelY);
+            drawLabel(x, y, w, h, labelText, '#F59E0B');
         });
 
         // --- Draw instant motion box for early feedback before backend confirmation
@@ -564,7 +571,7 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
 
                                         <canvas
                                             ref={canvasRef}
-                                            className="absolute inset-0 w-full h-full object-cover pointer-events-none z-50 block"
+                                            className="absolute inset-0 w-full h-full object-cover pointer-events-none z-[60] block"
                                         />
 
                                         {/* Camera Overlay HUD */}
