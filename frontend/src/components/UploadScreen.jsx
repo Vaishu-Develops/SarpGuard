@@ -372,45 +372,58 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
         canvas.height = videoHeight;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // --- Draw SNAKE boxes (red, center-based coords)
+        // --- Draw SNAKE boxes (Neon style)
         liveDetections.forEach(box => {
             const w = box.width;
             const h = box.height;
-            const x = box.x - (w / 2);
-            const y = box.y - (h / 2);
+            const x = Math.max(0, Math.min(canvas.width - w, box.x - (w / 2)));
+            const y = Math.max(0, Math.min(canvas.height - h, box.y - (h / 2)));
 
-            ctx.strokeStyle = '#F43F5E'; // Bright Red
-            ctx.lineWidth = 6; // Thicker for visibility
-            ctx.shadowColor = '#F43F5E';
+            // High-visibility Neon Border
+            ctx.strokeStyle = '#00FF00'; // Neon Green for threat
+            ctx.lineWidth = Math.max(3, canvas.width / 200); 
+            ctx.shadowColor = '#00FF00';
             ctx.shadowBlur = 15;
             ctx.strokeRect(x, y, w, h);
-
-            ctx.fillStyle = '#F43F5E';
             ctx.shadowBlur = 0;
-            ctx.font = 'bold 20px monospace'; // Larger font
-            ctx.fillText(`🐍 SNAKE ${(box.confidence * 100).toFixed(1)}%`, x + 5, y - 10);
+
+            // Adaptive Label Background
+            const fontSize = Math.max(14, Math.floor(canvas.width / 40));
+            const label = `🐍 SNAKE ${(box.confidence * 100).toFixed(0)}%`;
+            ctx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
+            const textMetrics = ctx.measureText(label);
+            const labelHeight = fontSize + 8;
+            
+            ctx.fillStyle = '#00FF00';
+            const labelY = y > labelHeight + 5 ? y - 5 : y + labelHeight + 5;
+            ctx.fillRect(x, labelY - labelHeight + 4, textMetrics.width + 12, labelHeight);
+
+            ctx.fillStyle = '#000000';
+            ctx.fillText(label, x + 6, labelY - 4);
         });
 
         // --- Draw DEVICE / SPOOF boxes (amber, absolute xyxy coords from YOLO)
         liveDeviceBoxes.forEach(box => {
-            const x = box.x1;
-            const y = box.y1;
+            const x = Math.max(0, Math.min(canvas.width, box.x1));
+            const y = Math.max(0, Math.min(canvas.height, box.y1));
             const w = box.x2 - box.x1;
             const h = box.y2 - box.y1;
 
-            ctx.strokeStyle = '#F59E0B'; // Amber / orange
+            ctx.strokeStyle = '#F59E0B'; // Amber
             ctx.lineWidth = 3;
-            ctx.shadowColor = '#F59E0B';
-            ctx.shadowBlur = 12;
             ctx.strokeRect(x, y, w, h);
 
-            // Fill label background
-            ctx.shadowBlur = 0;
-            ctx.fillStyle = 'rgba(245,158,11,0.85)';
-            ctx.fillRect(x, y - 22, ctx.measureText(`⚠ ${box.label} ${(box.confidence * 100).toFixed(0)}%`).width + 12, 20);
-            ctx.fillStyle = '#000';
-            ctx.font = 'bold 12px monospace';
-            ctx.fillText(`⚠ ${box.label} ${(box.confidence * 100).toFixed(0)}%`, x + 4, y - 7);
+            // Draw label background
+            const labelText = `📱 ${box.label.toUpperCase()} ${(box.confidence * 100).toFixed(0)}%`;
+            ctx.font = 'bold 14px monospace';
+            const textMetrics = ctx.measureText(labelText);
+            
+            ctx.fillStyle = '#F59E0B';
+            const labelY = y > 20 ? y - 5 : y + 18;
+            ctx.fillRect(x, labelY - 15, textMetrics.width + 8, 18);
+
+            ctx.fillStyle = '#000000';
+            ctx.fillText(labelText, x + 4, labelY);
         });
 
         // --- Draw instant motion box for early feedback before backend confirmation
