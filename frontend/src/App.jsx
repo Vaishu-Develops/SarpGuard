@@ -137,8 +137,7 @@ export default function App() {
     }, [isReady, screen, handleProcessingComplete]);
 
     const handleLogTamper = () => {
-        const ts = new Date().toLocaleString();
-        alert(`⚠️ TAMPER INCIDENT LOGGED\n\nTime: ${ts}\nLocation: ${locationName}\nReason: ${spoofReason}\n\nWhatsApp tamper alert has already been sent to the secretary.`);
+        console.log("Tamper incident logged to system history.");
     };
 
     const handleReset = () => {
