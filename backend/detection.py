@@ -148,7 +148,15 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
 
     def run_device_check():
         # Reduced imgz to 320 for significant memory savings on Render
-        results = get_device_model().predict(frame, classes=DEVICE_CLASSES, verbose=False, imgsz=320)
+        results = get_device_model().predict(
+            frame,
+            classes=DEVICE_CLASSES,
+            verbose=False,
+            imgsz=256,
+            conf=0.35,
+            iou=0.45,
+            max_det=5,
+        )
         for box in results[0].boxes:
             xyxy = box.xyxy[0].cpu().numpy()
             cls = int(box.cls[0].cpu().item())
@@ -310,7 +318,15 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
 
         # 2. Run Device Object Detection thread
         def run_device_check():
-            results = get_device_model().predict(frame, classes=DEVICE_CLASSES, verbose=False)
+            results = get_device_model().predict(
+                frame,
+                classes=DEVICE_CLASSES,
+                verbose=False,
+                imgsz=256,
+                conf=0.35,
+                iou=0.45,
+                max_det=5,
+            )
             for box in results[0].boxes:
                 # [x1, y1, x2, y2]
                 xyxy = box.xyxy[0].cpu().numpy()
