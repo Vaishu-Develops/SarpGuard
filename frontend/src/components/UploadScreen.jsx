@@ -376,27 +376,43 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
         ctx.lineJoin = 'round';
 
         const drawLabel = (x, y, width, height, label, fillColor, textColor = '#000000') => {
-            const fontSize = Math.max(14, Math.floor(canvas.width / 40));
-            ctx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
+            const fontSize = Math.max(18, Math.floor(canvas.width / 32));
+            ctx.font = `bold ${fontSize}px 'Courier New', monospace`;
             const textMetrics = ctx.measureText(label);
-            const labelWidth = Math.max(textMetrics.width + 14, 120);
-            const labelHeight = fontSize + 10;
+            const labelWidth = textMetrics.width + 22;
+            const labelHeight = fontSize + 14;
 
-            const fitsAbove = y - labelHeight - 6 > 0;
-            const labelX = Math.max(0, Math.min(canvas.width - labelWidth, x));
-            const labelY = fitsAbove ? y - labelHeight - 6 : Math.min(canvas.height - labelHeight - 4, y + height + 6);
+            const fitsAbove = y - labelHeight - 8 > 0;
+            const labelX = Math.max(4, Math.min(canvas.width - labelWidth - 4, x));
+            const labelY = fitsAbove ? y - labelHeight - 8 : Math.min(canvas.height - labelHeight - 4, y + height + 8);
 
+            // Draw semi-transparent dark background for contrast
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+            ctx.fillRect(labelX - 2, labelY - 2, labelWidth + 4, labelHeight + 4);
+
+            // Draw the colored accent bar
             ctx.fillStyle = fillColor;
-            ctx.fillRect(labelX, labelY, labelWidth, labelHeight);
-            ctx.strokeStyle = 'rgba(255,255,255,0.75)';
-            ctx.lineWidth = 1;
-            ctx.strokeRect(labelX, labelY, labelWidth, labelHeight);
+            ctx.fillRect(labelX, labelY, labelWidth, 4);
 
-            ctx.fillStyle = textColor;
-            ctx.strokeStyle = 'rgba(0,0,0,0.75)';
-            ctx.lineWidth = 3;
-            ctx.strokeText(label, labelX + 7, labelY + 4);
-            ctx.fillText(label, labelX + 7, labelY + 4);
+            // Draw outer border
+            ctx.strokeStyle = fillColor;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(labelX - 2, labelY - 2, labelWidth + 4, labelHeight + 4);
+
+            // Draw text with strong outline for readability
+            ctx.fillStyle = '#FFFFFF';
+            ctx.strokeStyle = 'rgba(0, 0, 0, 1)';
+            ctx.lineWidth = 5;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            ctx.strokeText(label, labelX + 11, labelY + fontSize + 4);
+            
+            ctx.fillStyle = fillColor;
+            ctx.lineWidth = 2;
+            ctx.strokeText(label, labelX + 11, labelY + fontSize + 4);
+            
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillText(label, labelX + 11, labelY + fontSize + 4);
         };
 
         // --- Draw SNAKE boxes (Neon style)
