@@ -16,7 +16,7 @@ sys.stderr.reconfigure(line_buffering=True)  # type: ignore
 # Add parent directory to path so imports work
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from backend.detection import detect_snake, detect_snake_image, detect_snake_frame, detect_screen_artifact
+from backend.detection import detect_snake, detect_snake_image, detect_snake_frame, detect_screen_artifact, prewarm_models
 from backend.classification import classify_snake
 from backend.alerts import send_whatsapp_alert, send_tamper_alert
 from backend.storage import save_detection, get_history
@@ -31,6 +31,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Pre-warm models on startup to avoid cold-start delays
+@app.on_event("startup")
+async def startup_event():
+    print("[Startup] SarpGuard Backend initializing...", flush=True)
+    prewarm_models()
+    print("[Startup] ✓ Backend ready for requests", flush=True)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):
