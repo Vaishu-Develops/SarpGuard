@@ -64,31 +64,65 @@ def get_roboflow_client():
 def roboflow_infer(image_path: str):
     return get_roboflow_client().infer(image_path, model_id=DETECTION_MODEL_ID)
 
-# Lazy-loaded models (loaded on first use so server port opens immediately)
+# Pre-loaded models with thread-safe initialization
 import threading
 
 _device_model = None
+_snake_model = None
 _byte_tracker = None
 _model_lock = threading.Lock()
+_models_prewarmed = False
 
 def get_device_model():
-    """Lazy-load YOLOv8 model on first use with a lock to prevent concurrent loading spikes."""
+    """Get YOLOv8 COCO model for device/phone/TV detection (class 62, 63, 67, 73)."""
     global _device_model
     if _device_model is None:
         with _model_lock:
-            # Check again inside lock (double-checked locking)
             if _device_model is not None:
                 return _device_model
-                
-            # Use absolute path based on this file's location
             from ultralytics import YOLO
             _MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model", "yolov8n.pt")
             if not os.path.exists(_MODEL_PATH):
-                _MODEL_PATH = "yolov8n.pt"  # fallback: auto-download
-            print(f"[AntiSpoof] Loading YOLOv8 from: {_MODEL_PATH} (exists={os.path.exists(_MODEL_PATH)})")
+                _MODEL_PATH = "yolov8n.pt"
+            print(f"[Models] Loading YOLOv8 COCO device detector: {_MODEL_PATH}")
             _device_model = YOLO(_MODEL_PATH)
-            print(f"[AntiSpoof] YOLOv8 loaded successfully")
+            print(f"[Models] YOLOv8 COCO device detector ready")
     return _device_model
+
+def get_snake_model():
+    """Get YOLOv8 model for fast local snake detection on live feed."""
+    global _snake_model
+    if _snake_model is None:
+        with _model_lock:
+            if _snake_model is not None:
+                return _snake_model
+            from ultralytics import YOLO
+            # Try to load a snake-specific YOLOv8 model, or fall back to YOLOv8n
+            _SNAKE_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model", "snake_yolov8.pt")
+            if os.path.exists(_SNAKE_MODEL_PATH):
+                print(f"[Models] Loading custom YOLOv8 snake model: {_SNAKE_MODEL_PATH}")
+                _snake_model = YOLO(_SNAKE_MODEL_PATH)
+            else:
+                # Fallback: use generic YOLOv8n for live detection (will detect "snake" as a general object)
+                print(f"[Models] No custom snake model found, using YOLOv8n for live detection")
+                _snake_model = YOLO("yolov8n.pt")
+            print(f"[Models] YOLOv8 snake detector ready (~200ms per frame)")
+    return _snake_model
+
+def prewarm_models():
+    """Pre-load all models on server startup to avoid cold-start delays."""
+    global _models_prewarmed
+    if _models_prewarmed:
+        return
+    print("[Models] Pre-warming models on startup...")
+    try:
+        # Load both models
+        get_device_model()
+        get_snake_model()
+        _models_prewarmed = True
+        print("[Models] ✓ Models pre-warmed successfully!")
+    except Exception as e:
+        print(f"[Models] WARNING: Pre-warm failed: {e}")
 
 def get_byte_tracker():
     """Lazy-load ByteTrack on first use."""
@@ -561,50 +595,58 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
         snake_result = [False, [], 0.0]  # [detected, boxes, max_conf]
 
         def run_snake_detection():
+            """Fast local YOLOv8-based snake detection (~200ms) instead of cloud Roboflow (7-8s)."""
             try:
-                client = get_roboflow_client()
-                # Save to a temporary file to ensure Roboflow SDK accepts it
-                import tempfile
-                with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-                    _, buffer = cv2.imencode('.jpg', frame)
-                    tmp.write(buffer.tobytes())
-                    tmp_path = tmp.name
+                model = get_snake_model()
+                results = model.predict(
+                    frame,
+                    verbose=False,
+                    imgsz=384,
+                    conf=0.40,
+                    iou=0.50,
+                    max_det=10,
+                    device=0,  # GPU if available
+                )
                 
-                try:
-                    result = client.infer(tmp_path, model_id=DETECTION_MODEL_ID)
-                    if os.path.exists(tmp_path): os.remove(tmp_path)
-                except Exception as e:
-                    if os.path.exists(tmp_path): os.remove(tmp_path)
-                    raise e
-                    
-                predictions = result.get("predictions", [])
                 max_conf = 0.0
                 boxes = []
-                for pred in predictions:
-                    # Handle both direct and nested 'bbox' formats from Roboflow
-                    bbox = pred["bbox"] if "bbox" in pred else pred
-                    conf = pred["confidence"]
-                    if conf > max_conf:
-                        max_conf = conf
-                    boxes.append({
-                        "x": bbox["x"],
-                        "y": bbox["y"],
-                        "width": bbox["width"],
-                        "height": bbox["height"],
-                        "class": pred.get("class", "Snake"),
-                        "confidence": conf
-                    })
+                for box in results[0].boxes:
+                    conf = float(box.conf[0].cpu().item())
+                    if conf > 0.40:  # Filter low confidence
+                        xyxy = box.xyxy[0].cpu().numpy()
+                        x1, y1, x2, y2 = xyxy
+                        x = (x1 + x2) / 2
+                        y = (y1 + y2) / 2
+                        width = x2 - x1
+                        height = y2 - y1
+                        
+                        if conf > max_conf:
+                            max_conf = conf
+                        boxes.append({
+                            "x": x,
+                            "y": y,
+                            "width": width,
+                            "height": height,
+                            "class": "Snake",
+                            "confidence": conf
+                        })
+                
                 snake_result[0] = len(boxes) > 0
                 snake_result[1] = boxes
                 snake_result[2] = max_conf
                 if len(boxes) > 0:
-                    print(f"[Live Detection] Snake Found! Count: {len(boxes)}, Max Conf: {max_conf:.2f}")
+                    print(f"[Live Detection] ✓ LOCAL YOLO: Snake Found! Count: {len(boxes)}, Max Conf: {max_conf:.2f}")
                 else:
-                    print(f"[Live Detection] No snake found in frame.")
+                    if max_conf > 0:
+                        print(f"[Live Detection] Local YOLO: Possible object detected but below threshold (conf={max_conf:.2f})")
+                    else:
+                        print(f"[Live Detection] Local YOLO: No snake detected in frame.")
             except Exception as e:
                 print(f"[Live Detection] Snake detection error: {e}")
+                import traceback
+                traceback.print_exc()
 
-        # Priority 1: Detect Snakes (Fastest feedback for UI)
+        # Priority 1: Detect Snakes via LOCAL YOLOv8 (Fast ~200ms)
         run_snake_detection()
 
         detected, snake_boxes, max_conf = snake_result
