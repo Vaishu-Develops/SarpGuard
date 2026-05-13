@@ -112,17 +112,38 @@ def get_snake_model():
 def prewarm_models():
     """Pre-load all models on server startup to avoid cold-start delays."""
     global _models_prewarmed
+    # Allow disabling prewarm when memory is constrained (e.g., deployment with low RAM)
+    prewarm_flag = os.environ.get("PREWARM_MODELS", "1").lower()
+    if prewarm_flag in ("0", "false", "no"):
+        print("[Models] PREWARM_MODELS=0 — skipping model pre-warm to save memory", flush=True)
+        return
+
     if _models_prewarmed:
         return
-    print("[Models] Pre-warming models on startup...")
+    print("[Models] Pre-warming models on startup...", flush=True)
     try:
-        # Load both models
-        get_device_model()
-        get_snake_model()
+        single = os.environ.get("SINGLE_MODEL", "").lower()
+        if single in ("device", "device_only"):
+            print("[Models] SINGLE_MODEL=device — pre-warming device model only", flush=True)
+            get_device_model()
+        elif single in ("snake", "snake_only"):
+            print("[Models] SINGLE_MODEL=snake — pre-warming snake model only", flush=True)
+            get_snake_model()
+        else:
+            # Default: load both
+            get_device_model()
+            get_snake_model()
+
         _models_prewarmed = True
-        print("[Models] ✓ Models pre-warmed successfully!")
+        print("[Models] ✓ Models pre-warmed successfully!", flush=True)
     except Exception as e:
-        print(f"[Models] WARNING: Pre-warm failed: {e}")
+        print(f"[Models] WARNING: Pre-warm failed: {e}", flush=True)
+
+
+def are_models_prewarmed() -> bool:
+    """Return True if models were successfully pre-warmed."""
+    global _models_prewarmed
+    return bool(_models_prewarmed)
 
 def get_byte_tracker():
     """Lazy-load ByteTrack on first use."""
