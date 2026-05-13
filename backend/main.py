@@ -16,7 +16,8 @@ sys.stderr.reconfigure(line_buffering=True)  # type: ignore
 # Add parent directory to path so imports work
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from backend.detection import detect_snake, detect_snake_image, detect_snake_frame, detect_screen_artifact, prewarm_models
+import threading
+from backend.detection import detect_snake, detect_snake_image, detect_snake_frame, detect_screen_artifact, prewarm_models, are_models_prewarmed
 from backend.classification import classify_snake
 from backend.alerts import send_whatsapp_alert, send_tamper_alert
 from backend.storage import save_detection, get_history
@@ -36,8 +37,19 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     print("[Startup] SarpGuard Backend initializing...", flush=True)
-    prewarm_models()
-    print("[Startup] ✓ Backend ready for requests", flush=True)
+    # Pre-warm models in a background thread so the app can bind to the port immediately
+    try:
+        t = threading.Thread(target=prewarm_models, daemon=True)
+        t.start()
+        print("[Startup] Model pre-warm started in background thread", flush=True)
+    except Exception as e:
+        print(f"[Startup] Failed to start model pre-warm thread: {e}", flush=True)
+    print("[Startup] ✓ Backend ready for requests (models may still be loading)", flush=True)
+
+# Readiness / health endpoint for platform probes
+@app.get('/health')
+def health():
+    return {"status": "ok", "models_prewarmed": are_models_prewarmed()}
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):
