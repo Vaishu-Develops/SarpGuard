@@ -37,13 +37,18 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     print("[Startup] SarpGuard Backend initializing...", flush=True)
-    # Pre-warm models in a background thread so the app can bind to the port immediately
-    try:
-        t = threading.Thread(target=prewarm_models, daemon=True)
-        t.start()
-        print("[Startup] Model pre-warm started in background thread", flush=True)
-    except Exception as e:
-        print(f"[Startup] Failed to start model pre-warm thread: {e}", flush=True)
+    # Pre-warm models in a background thread so the app can bind to the port immediately.
+    # If PREWARM_MODELS is disabled, skip the thread entirely to keep logs accurate.
+    prewarm_flag = os.environ.get("PREWARM_MODELS", "1").lower()
+    if prewarm_flag in ("0", "false", "no"):
+        print("[Startup] Model pre-warm disabled by PREWARM_MODELS=0", flush=True)
+    else:
+        try:
+            t = threading.Thread(target=prewarm_models, daemon=True)
+            t.start()
+            print("[Startup] Model pre-warm started in background thread", flush=True)
+        except Exception as e:
+            print(f"[Startup] Failed to start model pre-warm thread: {e}", flush=True)
     print("[Startup] ✓ Backend ready for requests (models may still be loading)", flush=True)
 
 # Readiness / health endpoint for platform probes

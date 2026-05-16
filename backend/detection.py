@@ -14,6 +14,18 @@ def convert_video_to_mp4(input_path: str) -> str:
     Uses the ffmpeg binary bundled with imageio-ffmpeg (no system install needed).
     Returns the path to the converted file, or the original if conversion fails/is unnecessary.
     """
+    ext = os.path.splitext(input_path)[1].lower()
+
+    # MP4 files are usually already readable by OpenCV, so avoid an unnecessary
+    # ffmpeg transcode step unless the file is actually unreadable.
+    if ext == ".mp4":
+        cap = cv2.VideoCapture(input_path)
+        if cap.isOpened():
+            cap.release()
+            print(f"[VideoConvert] Skipping conversion for readable MP4: {input_path}")
+            return input_path
+        cap.release()
+
     output_path = input_path.rsplit(".", 1)[0] + "_converted.mp4"
     try:
         import imageio_ffmpeg
