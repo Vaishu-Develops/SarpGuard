@@ -263,7 +263,7 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
         };
     }, [isLiveDetecting, isCameraActive]);
 
-    // LOOP 2: Slower snake detection via Roboflow (2.5s) — auto-triggers on real snake
+    // LOOP 2: Live snake detection — trigger alert UI immediately, confirm in background
     useEffect(() => {
         let intervalId;
 
@@ -276,11 +276,15 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
             liveSnakeRequestInFlightRef.current = true;
 
             try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 4500);
                 const response = await fetch(`${API_BASE_URL}/detect-live`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ frame: imageSrc })
+                    body: JSON.stringify({ frame: imageSrc }),
+                    signal: controller.signal,
                 });
+                clearTimeout(timeoutId);
 
                 if (response.ok) {
                     const data = await response.json();
@@ -315,7 +319,7 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
                         setStaticWarning(false);
                     }
 
-                    // AUTO-TRIGGER: only if snake found AND NOT a spoof
+                    // AUTO-TRIGGER: snake found and not spoof -> show alert screen immediately
                     if (data.detected && snakeBoxes.length > 0 && !data.spoof_detected && location && !hasTriggeredRef.current) {
                         hasTriggeredRef.current = true;
                         setIsLiveDetecting(false);
@@ -328,14 +332,29 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
 
                         setFile(frameFile);
 
+                        if (onLiveSnakeDetected) {
+                            onLiveSnakeDetected({
+                                confidence: Number(data.confidence) || (snakeBoxes[0]?.confidence ? Number((snakeBoxes[0].confidence * 100).toFixed(1)) : 0),
+                                status: 'SNAKE DETECTED',
+                                imagePath: '',
+                                timestamp: new Date().toLocaleTimeString(),
+                            });
+                        }
+
                         if (onAnalyze) {
-                            await onAnalyze(frameFile);
+                            // Heavy backend confirmation runs in background so alert UI is instant.
+                            onAnalyze(frameFile, { silent: true }).catch((err) => {
+                                console.error('Background analyze failed:', err);
+                            });
                         }
                     }
                 } else {
                     console.warn(`Live snake detection failed with status ${response.status}`);
                 }
             } catch (err) {
+                if (err?.name === 'AbortError') {
+                    console.warn('Live snake detection timed out (skipped frame).');
+                }
                 console.error("Snake detection error:", err);
             } finally {
                 liveSnakeRequestInFlightRef.current = false;
