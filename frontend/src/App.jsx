@@ -35,12 +35,15 @@ export default function App() {
 
     const locationName = location ? LOCATIONS[location]?.name || location : '';
 
-    const handleAnalyze = async (fileArg = null) => {
+    const handleAnalyze = async (fileArg = null, options = {}) => {
         // Ensure we only use the argument if it's a real File/Blob (not a click event)
         const fileToUse = (fileArg instanceof File || fileArg instanceof Blob) ? fileArg : file;
+        const silent = Boolean(options?.silent);
 
-        setScreen('processing');
-        setIsReady(false);
+        if (!silent) {
+            setScreen('processing');
+            setIsReady(false);
+        }
 
         const startTime = Date.now();
 
@@ -91,7 +94,9 @@ export default function App() {
                 setImagePath(resultImagePath);
                 setApiTimestamp(resultTimestamp);
                 setAnalysisTime(Math.round((Date.now() - startTime) / 1000) || 1);
-                setIsReady(true);
+                if (!silent) {
+                    setIsReady(true);
+                }
             } else {
                 errorMessage = `Server Error (${response.status}): The security matrix is temporarily unavailable.`;
                 throw new Error("API Not OK");
@@ -102,8 +107,10 @@ export default function App() {
                 errorMessage = "Analysis Timeout: The server took too long to respond. Please try a smaller file or better connection.";
             }
             console.error("Fetch failed", err);
-            setScreen('upload');
-            alert(errorMessage);
+            if (!silent) {
+                setScreen('upload');
+                alert(errorMessage);
+            }
         }
     };
 
