@@ -339,12 +339,19 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
     if total_frames <= 0:
         total_frames = 300
 
-    # For short videos (< 5s), sample every ~0.5 second; otherwise spread across video
+    # Adaptive sampling to keep detection responsive on low-memory / low-CPU deployments.
+    # Long videos use fewer samples to reduce total Roboflow round-trips.
     if duration <= 5:
         step = max(1, int(fps * 0.5))  # every 0.5 seconds
         frame_indices = list(range(0, total_frames, step))
     else:
-        sample_count = min(max_samples, total_frames)
+        if duration > 60:
+            sample_budget = 4
+        elif duration > 20:
+            sample_budget = 6
+        else:
+            sample_budget = max_samples
+        sample_count = min(sample_budget, total_frames)
         if sample_count <= 1:
             frame_indices = [0]
         else:
@@ -366,7 +373,9 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
     # Reset tracker for new video
     get_byte_tracker().reset()
 
-    for idx in frame_indices:
+    spoof_every = 4 if duration > 20 else 3
+
+    for sample_pos, idx in enumerate(frame_indices):
         cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
         ret, frame = cap.read()
         if not ret:
@@ -402,8 +411,12 @@ def detect_snake(video_path: str, output_image_path: str, crop_image_path: str, 
                 if conf > 0.3: # Lowered from 0.4
                     spoof_device_boxes.append({"box": xyxy, "cls": cls, "conf": conf})
 
-        # Start background threads for anti-spoof checks (only every 3rd frame to save time)
-        do_spoof_check = (idx % 3 == 0) or (idx == frame_indices[0]) or (idx == frame_indices[-1])
+        # Start background threads for anti-spoof checks on a reduced cadence for long videos.
+        do_spoof_check = (
+            sample_pos == 0
+            or sample_pos == len(frame_indices) - 1
+            or (sample_pos % spoof_every == 0)
+        )
         
         thread_artifacts = None
         thread_devices = None
