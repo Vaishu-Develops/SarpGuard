@@ -58,7 +58,12 @@ export default function App() {
         let resultStatus = 'VENOMOUS';
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000); // Increased to 60s
+        const isVideo = Boolean(fileToUse?.type?.startsWith('video/'));
+        const fileSizeMB = Number(fileToUse?.size || 0) / (1024 * 1024);
+        const timeoutMs = isVideo
+            ? (fileSizeMB > 80 ? 300000 : fileSizeMB > 30 ? 210000 : 150000)
+            : 90000;
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
         let errorMessage = "Connection to Security Server lost. Please check your internet or wait for server to reboot.";
 
