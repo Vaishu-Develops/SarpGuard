@@ -17,7 +17,7 @@ sys.stderr.reconfigure(line_buffering=True)  # type: ignore
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import threading
-from backend.detection import detect_snake, detect_snake_image, detect_snake_frame, detect_screen_artifact, prewarm_models, are_models_prewarmed
+from backend.detection import detect_snake, detect_snake_image, detect_snake_frame, detect_screen_artifact, prewarm_models, are_models_prewarmed, fast_video_preflight
 from backend.classification import classify_snake
 from backend.alerts import send_whatsapp_alert, send_tamper_alert
 from backend.storage import save_detection, get_history
@@ -138,6 +138,21 @@ async def detect(
         if is_image:
             detected, yolo_conf, actual_crop_path, is_spoof, spoof_reason = detect_snake_image(input_filename, image_filename, crop_filename)
         else:
+            # Fast first-pass orchestration: detect phone screen / bezel / device quickly.
+            fast_spoof, fast_reason = fast_video_preflight(input_filename, image_filename)
+            if fast_spoof:
+                print(f"[Main] Fast preflight spoof detected. Reason: {fast_reason}")
+                if len(fast_reason) > 0:
+                    send_tamper_alert(location, 100.0, fast_reason)
+                return {
+                    "status": "Media Spoof Detected",
+                    "confidence": 100.0,
+                    "image_path": f"/images/detected_{timestamp_str}_{uid}.jpg" if os.path.exists(image_filename) else "",
+                    "alert_sent": False,
+                    "timestamp": readable_timestamp,
+                    "spoof_reason": fast_reason,
+                }
+
             detected, yolo_conf, actual_crop_path, is_spoof, spoof_reason = detect_snake(input_filename, image_filename, crop_filename)
         
         status = "Harmless"
