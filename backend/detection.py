@@ -109,15 +109,14 @@ def get_snake_model():
             if _snake_model is not None:
                 return _snake_model
             from ultralytics import YOLO
-            # Try to load a snake-specific YOLOv8 model, or fall back to YOLOv8n
+            # Only load a custom snake model. The COCO YOLOv8n model does not have a snake class.
             _SNAKE_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model", "snake_yolov8.pt")
             if os.path.exists(_SNAKE_MODEL_PATH):
                 print(f"[Models] Loading custom YOLOv8 snake model: {_SNAKE_MODEL_PATH}")
                 _snake_model = YOLO(_SNAKE_MODEL_PATH)
             else:
-                # Fallback: use generic YOLOv8n for live detection (will detect "snake" as a general object)
-                print(f"[Models] No custom snake model found, using YOLOv8n for live detection")
-                _snake_model = YOLO("yolov8n.pt")
+                print(f"[Models] No custom snake model found; live snake detection will use Roboflow fallback")
+                return None
             print(f"[Models] YOLOv8 snake detector ready (~200ms per frame)")
     return _snake_model
 
@@ -637,62 +636,91 @@ def detect_snake_frame(base64_data: str) -> tuple[bool, list, np.ndarray, float,
             print("[Live Detection] Failed to decode base64 frame.")
             return False, [], None, 0.0, [], False, ""
 
-        # --- Fast path: snake detection only ---
+        # --- Snake detection path ---
         snake_result = [False, [], 0.0]  # [detected, boxes, max_conf]
 
         def run_snake_detection():
-            """Fast local YOLOv8-based snake detection (~200ms) instead of cloud Roboflow (7-8s)."""
+            """Use a custom local snake model if available; otherwise fall back to Roboflow."""
             try:
                 model = get_snake_model()
-                results = model.predict(
-                    frame,
-                    verbose=False,
-                    imgsz=384,
-                    conf=0.40,
-                    iou=0.50,
-                    max_det=10,
-                    device=0,  # GPU if available
-                )
-                
                 max_conf = 0.0
                 boxes = []
-                for box in results[0].boxes:
-                    conf = float(box.conf[0].cpu().item())
-                    if conf > 0.40:  # Filter low confidence
-                        xyxy = box.xyxy[0].cpu().numpy()
-                        x1, y1, x2, y2 = xyxy
-                        x = (x1 + x2) / 2
-                        y = (y1 + y2) / 2
-                        width = x2 - x1
-                        height = y2 - y1
-                        
+
+                if model is not None:
+                    results = model.predict(
+                        frame,
+                        verbose=False,
+                        imgsz=384,
+                        conf=0.40,
+                        iou=0.50,
+                        max_det=10,
+                    )
+
+                    for box in results[0].boxes:
+                        conf = float(box.conf[0].cpu().item())
+                        if conf > 0.40:
+                            xyxy = box.xyxy[0].cpu().numpy()
+                            x1, y1, x2, y2 = xyxy
+                            x = (x1 + x2) / 2
+                            y = (y1 + y2) / 2
+                            width = x2 - x1
+                            height = y2 - y1
+                            if conf > max_conf:
+                                max_conf = conf
+                            boxes.append({
+                                "x": x,
+                                "y": y,
+                                "width": width,
+                                "height": height,
+                                "class": "Snake",
+                                "confidence": conf
+                            })
+                    source_name = "LOCAL"
+                else:
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                        _, buffer = cv2.imencode('.jpg', frame)
+                        tmp.write(buffer.tobytes())
+                        tmp_path = tmp.name
+
+                    try:
+                        result = roboflow_infer(tmp_path)
+                    finally:
+                        if os.path.exists(tmp_path):
+                            os.remove(tmp_path)
+
+                    predictions = result.get("predictions", [])
+                    for pred in predictions:
+                        bbox = pred["bbox"] if "bbox" in pred else pred
+                        conf = float(pred.get("confidence", 0.0))
                         if conf > max_conf:
                             max_conf = conf
                         boxes.append({
-                            "x": x,
-                            "y": y,
-                            "width": width,
-                            "height": height,
-                            "class": "Snake",
+                            "x": bbox["x"],
+                            "y": bbox["y"],
+                            "width": bbox["width"],
+                            "height": bbox["height"],
+                            "class": pred.get("class", "Snake"),
                             "confidence": conf
                         })
+                    source_name = "ROBOFLOW"
                 
                 snake_result[0] = len(boxes) > 0
                 snake_result[1] = boxes
                 snake_result[2] = max_conf
                 if len(boxes) > 0:
-                    print(f"[Live Detection] ✓ LOCAL YOLO: Snake Found! Count: {len(boxes)}, Max Conf: {max_conf:.2f}")
+                    print(f"[Live Detection] ✓ {source_name}: Snake Found! Count: {len(boxes)}, Max Conf: {max_conf:.2f}")
                 else:
                     if max_conf > 0:
-                        print(f"[Live Detection] Local YOLO: Possible object detected but below threshold (conf={max_conf:.2f})")
+                        print(f"[Live Detection] {source_name}: Possible object detected but below threshold (conf={max_conf:.2f})")
                     else:
-                        print(f"[Live Detection] Local YOLO: No snake detected in frame.")
+                        print(f"[Live Detection] {source_name}: No snake detected in frame.")
             except Exception as e:
                 print(f"[Live Detection] Snake detection error: {e}")
                 import traceback
                 traceback.print_exc()
 
-        # Priority 1: Detect Snakes via LOCAL YOLOv8 (Fast ~200ms)
+        # Priority 1: Detect Snakes
         run_snake_detection()
 
         detected, snake_boxes, max_conf = snake_result
