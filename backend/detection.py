@@ -193,6 +193,75 @@ def check_bbox_overlap(boxA, boxB):
     # If the intersection covers at least 30% of the snake, consider it overlapping
     return (interArea / float(boxAArea)) > 0.3
 
+def fast_video_preflight(video_path: str, output_image_path: str = "") -> tuple[bool, str]:
+    """
+    Fast first-pass video scan used by the orchestrator.
+    Returns (is_spoof, reason).
+    It checks only the first readable frame for bezel/screen/device signals so the app
+    can surface a phone-screen alert early instead of waiting for the full pipeline.
+    """
+    converted_path = convert_video_to_mp4(video_path)
+    cap = cv2.VideoCapture(converted_path)
+    if not cap.isOpened():
+        if converted_path != video_path and os.path.exists(converted_path):
+            os.remove(converted_path)
+        return False, ""
+
+    try:
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            return False, ""
+
+        # Shrink to keep the first-pass quick.
+        h, w = frame.shape[:2]
+        if max(h, w) > 960:
+            scale = 960.0 / float(max(h, w))
+            frame = cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+
+        # 1) Screen artifact check
+        is_screen, score, reason = detect_screen_artifact(frame)
+        if is_screen:
+            print(f"[Preflight] Screen artifact detected early: {reason}")
+            if output_image_path:
+                cv2.imwrite(output_image_path, frame)
+            return True, reason or "Screen artifact detected"
+
+        # 2) Device/phone/TV check
+        try:
+            device_model = get_device_model()
+            results = device_model.predict(
+                frame,
+                classes=DEVICE_CLASSES,
+                verbose=False,
+                imgsz=256,
+                conf=0.25,
+                iou=0.45,
+                max_det=5,
+            )
+
+            device_hits = []
+            for box in results[0].boxes:
+                conf = float(box.conf[0].cpu().item())
+                if conf > 0.25:
+                    cls = int(box.cls[0].cpu().item())
+                    label = DEVICE_CLASS_NAMES.get(cls, f"Device({cls})")
+                    device_hits.append(f"{label} ({conf*100:.0f}%)")
+
+            if device_hits:
+                reason_text = f"Detected device/display: {', '.join(device_hits)}"
+                print(f"[Preflight] {reason_text}")
+                if output_image_path:
+                    cv2.imwrite(output_image_path, frame)
+                return True, reason_text
+        except Exception as e:
+            print(f"[Preflight] Device check failed: {e}")
+
+        return False, ""
+    finally:
+        cap.release()
+        if converted_path != video_path and os.path.exists(converted_path):
+            os.remove(converted_path)
+
 def detect_snake_image(image_path: str, output_image_path: str, crop_image_path: str) -> tuple[bool, float, str, bool, str]:
     """
     Handles a single still image (JPEG/PNG/WebP) uploaded directly.
@@ -252,12 +321,12 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
         art_is_spoof, _, art_reason = spoof_artifact_result
         if art_is_spoof:
             is_spoof = True
-            spoof_reasons.append(art_reason)
+                return False, "", ""
         for device in spoof_device_boxes:
             is_spoof = True
             cls_name = get_device_model().names[device["cls"]]
             spoof_reasons.append(f"Detected '{cls_name}' display")
-            
+                    return False, "", ""
         return False, 0.0, "", is_spoof, " | ".join(spoof_reasons)
 
     top = sorted(predictions, key=lambda x: x["confidence"], reverse=True)[0]
@@ -269,7 +338,9 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
     x, y = bbox["x"], bbox["y"]
     box_w, box_h = bbox["width"], bbox["height"]
     snake_xyxy = [x - box_w / 2, y - box_h / 2, x + box_w / 2, y + box_h / 2]
-
+                    if output_image_path:
+                        cv2.imwrite(output_image_path, frame)
+                    return True, reason or "Screen artifact detected"
     # Anti-spoof evaluation
     is_spoof = False
     spoof_reasons = []
@@ -295,12 +366,14 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
     final_crop_path = crop_image_path
     if crop.size > 0:
         cv2.imwrite(crop_image_path, crop)
-    else:
+                        if output_image_path:
+                            cv2.imwrite(output_image_path, frame)
+                        return True, reason_text
         final_crop_path = output_image_path
 
     # Draw bounding box on output image
     cv2.rectangle(frame, (int(snake_xyxy[0]), int(snake_xyxy[1])), (int(snake_xyxy[2]), int(snake_xyxy[3])), (0, 0, 255), 2)
-    cv2.putText(frame, f"Snake {conf*100:.1f}%", (int(snake_xyxy[0]), int(snake_xyxy[1]) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                return False, "", ""
     cv2.imwrite(output_image_path, frame)
 
     return True, conf, final_crop_path, is_spoof, " | ".join(spoof_reasons)
