@@ -277,7 +277,7 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
 
             try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 4500);
+                const timeoutId = setTimeout(() => controller.abort(), 15000);
                 const response = await fetch(`${API_BASE_URL}/detect-live`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
