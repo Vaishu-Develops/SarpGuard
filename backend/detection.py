@@ -282,7 +282,6 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
         spoof_artifact_result[0], spoof_artifact_result[1], spoof_artifact_result[2] = detect_screen_artifact(frame)
 
     def run_device_check():
-        # Reduced imgz to 320 for significant memory savings on Render
         results = get_device_model().predict(
             frame,
             classes=DEVICE_CLASSES,
@@ -299,7 +298,6 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
             if conf > 0.3:
                 spoof_device_boxes.append({"box": xyxy, "cls": cls, "conf": conf})
 
-    # Run checks sequentially on memory-constrained Render to prevent crashes
     run_artifact_check()
     run_device_check()
 
@@ -315,33 +313,28 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
 
     if not predictions:
         print("[Detection] No snake found in image. Checking for spoofing anyway...")
-        # Check if it was a spoof even without a snake
         is_spoof = False
         spoof_reasons = []
         art_is_spoof, _, art_reason = spoof_artifact_result
         if art_is_spoof:
             is_spoof = True
-                return False, "", ""
+            spoof_reasons.append(art_reason)
         for device in spoof_device_boxes:
             is_spoof = True
             cls_name = get_device_model().names[device["cls"]]
             spoof_reasons.append(f"Detected '{cls_name}' display")
-                    return False, "", ""
+
         return False, 0.0, "", is_spoof, " | ".join(spoof_reasons)
 
     top = sorted(predictions, key=lambda x: x["confidence"], reverse=True)[0]
     conf = top["confidence"]
     print(f"[Detection] Image snake found: {conf*100:.1f}% confidence")
 
-    # Handle both direct and nested 'bbox' formats from Roboflow
     bbox = top["bbox"] if "bbox" in top else top
     x, y = bbox["x"], bbox["y"]
     box_w, box_h = bbox["width"], bbox["height"]
     snake_xyxy = [x - box_w / 2, y - box_h / 2, x + box_w / 2, y + box_h / 2]
-                    if output_image_path:
-                        cv2.imwrite(output_image_path, frame)
-                    return True, reason or "Screen artifact detected"
-    # Anti-spoof evaluation
+
     is_spoof = False
     spoof_reasons = []
     art_is_spoof, _, art_reason = spoof_artifact_result
@@ -354,7 +347,6 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
             cls_name = get_device_model().names[device["cls"]]
             spoof_reasons.append(f"Snake overlaps '{cls_name}' display")
 
-    # Crop the snake region
     h, w = frame.shape[:2]
     pad_x = int(box_w * 0.1)
     pad_y = int(box_h * 0.1)
@@ -366,14 +358,11 @@ def detect_snake_image(image_path: str, output_image_path: str, crop_image_path:
     final_crop_path = crop_image_path
     if crop.size > 0:
         cv2.imwrite(crop_image_path, crop)
-                        if output_image_path:
-                            cv2.imwrite(output_image_path, frame)
-                        return True, reason_text
+    else:
         final_crop_path = output_image_path
 
-    # Draw bounding box on output image
     cv2.rectangle(frame, (int(snake_xyxy[0]), int(snake_xyxy[1])), (int(snake_xyxy[2]), int(snake_xyxy[3])), (0, 0, 255), 2)
-                return False, "", ""
+    cv2.putText(frame, f"Snake {conf*100:.1f}%", (int(snake_xyxy[0]), max(0, int(snake_xyxy[1]) - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
     cv2.imwrite(output_image_path, frame)
 
     return True, conf, final_crop_path, is_spoof, " | ".join(spoof_reasons)
