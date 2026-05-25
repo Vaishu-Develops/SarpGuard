@@ -279,7 +279,7 @@ async def detect_device(data: LiveFrame):
                 xyxy = box.xyxy[0].cpu().numpy().tolist()
                 cls = int(box.cls[0].cpu().item())
                 conf = float(box.conf[0].cpu().item())
-                if conf > 0.25:  # Lower threshold for faster detection
+                if conf > 0.15:  # Lower threshold for easier phone/screen detection at distance
                     label = DEVICE_CLASS_NAMES.get(cls, f"Device({cls})")
                     device_boxes.append({
                         "x1": xyxy[0], "y1": xyxy[1],
