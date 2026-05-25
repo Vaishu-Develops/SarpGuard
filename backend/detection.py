@@ -980,8 +980,18 @@ def detect_screen_artifact(frame: np.ndarray) -> tuple[bool, float, str]:
     if sat_override:
         reasons.append("OVERRIDE: Extreme color saturation (impossible in natural scenes)")
 
-    # Threshold 0.28 — lower threshold since saturation is now primary signal
-    is_screen = final_score >= 0.28 or sat_override
+    # Fast-path for phone screens: combined bezel + luminance signature is enough even if
+    # the weighted average stays low (common when the phone displays a normal-looking video).
+    bezel_lum_hint = len(scores) >= 3 and scores[0] >= 0.03 and scores[2] >= 0.08
+    edge_bezel_hint = len(scores) >= 2 and scores[0] >= 0.04 and scores[1] >= 0.08
+
+    # Threshold 0.28 — keep the original weighted check, but allow the fast hints above.
+    if bezel_lum_hint:
+        reasons.append("Fast-path: bezel + luminance screen signature")
+    if edge_bezel_hint:
+        reasons.append("Fast-path: bezel + edge screen signature")
+
+    is_screen = final_score >= 0.28 or sat_override or bezel_lum_hint or edge_bezel_hint
 
     reason_str = " | ".join(reasons) if reasons else "No screen artifacts detected"
 
