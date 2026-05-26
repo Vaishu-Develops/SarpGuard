@@ -8,6 +8,7 @@ import os
 import uvicorn
 import sys
 from pathlib import Path
+from datetime import datetime
 
 # Force unbuffered output so all print() logs appear immediately in terminal
 sys.stdout.reconfigure(line_buffering=True)  # type: ignore
@@ -86,6 +87,11 @@ class DetectionRecord(BaseModel):
     
 class LiveFrame(BaseModel):
     frame: str
+
+class TamperLog(BaseModel):
+    location: str
+    spoof_confidence: float = 0.0
+    reason: str = "Phone screen or video detected"
     
 @app.get("/")
 def read_root():
@@ -144,10 +150,12 @@ async def detect(
                 print(f"[Main] Fast preflight spoof detected. Reason: {fast_reason}")
                 if len(fast_reason) > 0:
                     send_tamper_alert(location, 100.0, fast_reason)
+                fast_image_url = f"/images/detected_{timestamp_str}_{uid}.jpg"
+                print(f"[Main] 🚀 Fast preflight image path: {fast_image_url} (exists: {os.path.exists(image_filename)})", flush=True)
                 return {
                     "status": "Media Spoof Detected",
                     "confidence": 100.0,
-                    "image_path": f"/images/detected_{timestamp_str}_{uid}.jpg" if os.path.exists(image_filename) else "",
+                    "image_path": fast_image_url,
                     "alert_sent": False,
                     "timestamp": readable_timestamp,
                     "spoof_reason": fast_reason,
@@ -168,10 +176,12 @@ async def detect(
             if detected or yolo_conf > 0.5:
                 send_tamper_alert(location, yolo_conf * 100, spoof_reason)
             
+            spoof_image_url = f"/images/detected_{timestamp_str}_{uid}.jpg"
+            print(f"[Main] 🛑 Spoof detection image path: {spoof_image_url} (exists: {os.path.exists(image_filename)})", flush=True)
             return {
                 "status": status,
                 "confidence": yolo_conf * 100,
-                "image_path": f"/images/detected_{timestamp_str}_{uid}.jpg" if os.path.exists(image_filename) else "",
+                "image_path": spoof_image_url,
                 "alert_sent": False,
                 "timestamp": readable_timestamp,
                 "spoof_reason": spoof_reason
@@ -196,6 +206,7 @@ async def detect(
                 alert_sent = False
             
             # 4. Save history
+            image_url = f"/images/detected_{timestamp_str}_{uid}.jpg"
             try:
                 record = {
                     "id": uid,
@@ -203,16 +214,17 @@ async def detect(
                     "location": location,
                     "status": status,
                     "confidence": confidence,
-                    "image_path": f"/images/detected_{timestamp_str}_{uid}.jpg"
+                    "image_path": image_url
                 }
                 save_detection(record)
             except Exception as e:
                 print(f"[History Error] {e}")
             
+            print(f"[Main] ✅ Detection complete. Image path: {image_url} (exists: {os.path.exists(image_filename)})", flush=True)
             return {
                 "status": status, 
                 "confidence": confidence, 
-                "image_path": f"/images/detected_{timestamp_str}_{uid}.jpg", 
+                "image_path": image_url, 
                 "alert_sent": alert_sent,
                 "timestamp": readable_timestamp
                 }
@@ -308,6 +320,44 @@ async def detect_device(data: LiveFrame):
     except Exception as e:
         print(f"[DeviceDetect] Error: {e}", flush=True)
         return {"device_boxes": [], "is_screen": False, "reason": ""}
+
+@app.post("/log-tamper")
+async def log_tamper(data: TamperLog):
+    """
+    Log a tamper incident when someone tries to trigger a false alarm using a phone screen.
+    Sends WhatsApp alert to security team.
+    """
+    try:
+        location = data.location or "Unknown Location"
+        confidence = data.spoof_confidence
+        reason = data.reason
+        
+        print(f"[TamperLog] ==========================================", flush=True)
+        print(f"[TamperLog] ⚠️  TAMPER INCIDENT DETECTED!", flush=True)
+        print(f"[TamperLog] Location: {location}", flush=True)
+        print(f"[TamperLog] Confidence: {confidence:.2%}", flush=True)
+        print(f"[TamperLog] Reason: {reason}", flush=True)
+        print(f"[TamperLog] ==========================================", flush=True)
+        
+        # Send alert to security team
+        print(f"[TamperLog] 🔄 Attempting to send WhatsApp alert...", flush=True)
+        alert_sent = send_tamper_alert(location, confidence, reason)
+        print(f"[TamperLog] ✅ Alert sent: {alert_sent}", flush=True)
+        
+        return {
+            "status": "LOGGED",
+            "message": "Tamper incident recorded and security team notified",
+            "alert_sent": alert_sent,
+            "location": location,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        print(f"[TamperLog] Error: {e}", flush=True)
+        return {
+            "status": "ERROR",
+            "message": str(e),
+            "alert_sent": False
+        }
 
 @app.get("/history", response_model=List[DetectionRecord])
 def history():
