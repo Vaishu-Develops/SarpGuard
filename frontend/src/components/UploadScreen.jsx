@@ -1,6 +1,7 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { Camera, FolderOpen, MapPin, Search, Crosshair, Terminal, Activity, Video } from 'lucide-react';
 import Webcam from 'react-webcam';
+import { getApiBaseUrl } from '../lib/apiBase';
 
 const LOCATIONS = [
     { id: 'block-a', name: 'BLOCK A - MAIN SENSOR' },
@@ -11,7 +12,10 @@ const LOCATIONS = [
     { id: 'block-f', name: 'BLOCK F - PLAYGROUND' },
 ];
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE_URL = getApiBaseUrl();
+const IS_LOCAL = API_BASE_URL === ''; // Empty string means using Vite proxy (localhost)
+const FRAMES_REQUIRED_FOR_ALERT = IS_LOCAL ? 3 : 1; // 3 frames for snake detection in local, 1 for deployment
+const FRAMES_REQUIRED_FOR_SPOOF = IS_LOCAL ? 5 : 1; // 5 frames for phone/screen detection in local
 
 export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpoofDetected, file, setFile, location, setLocation }) {
     const fileInputRef = useRef(null);
@@ -24,6 +28,8 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
     const motionLoopRafRef = useRef(null);
     const motionThrottleRef = useRef(0);
     const motionPreviousFrameRef = useRef(null);
+    const consecutiveDetectionsRef = useRef(0); // Track consecutive frames with snake detection
+    const consecutiveSpoofDetectionsRef = useRef(0); // Track consecutive frames with phone/screen detection
 
     const [isCameraActive, setIsCameraActive] = useState(false);
     const [capturing, setCapturing] = useState(false);
@@ -34,6 +40,8 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
     const [liveDeviceBoxes, setLiveDeviceBoxes] = useState([]);
     const [liveSpoofAlert, setLiveSpoofAlert] = useState(null); // null | { detected: bool, reason: string }
     const [motionBox, setMotionBox] = useState(null);
+    const [consecutiveDetections, setConsecutiveDetections] = useState(0); // Display consecutive detections
+    const [consecutiveSpoofDetections, setConsecutiveSpoofDetections] = useState(0); // Display consecutive spoof detections
     // Static snake tracking: track frames where a snake was found but didn't move
     const snakePositionHistoryRef = useRef([]);
     const [staticWarning, setStaticWarning] = useState(false);
@@ -126,11 +134,14 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
             if (liveDeviceRequestInFlightRef.current) return;
             liveDeviceRequestInFlightRef.current = true;
             try {
-                const res = await fetch(`${API_BASE_URL}/detect-device`, {
+                const url = `${API_BASE_URL}/detect-device`;
+                console.log('[DeviceDetect] Sending POST to:', url);
+                const res = await fetch(url, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ frame: imageSrc })
                 });
+                console.log('[DeviceDetect] Response status:', res.status);
                 if (res.ok) {
                     const data = await res.json();
                     setLiveDeviceBoxes(data.device_boxes || []);
@@ -149,9 +160,13 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
                     } else {
                         setLiveSpoofAlert(null);
                     }
+                } else {
+                    console.warn('[DeviceDetect] Failed with status:', res.status);
+                    const text = await res.text();
+                    console.warn('[DeviceDetect] Error response:', text);
                 }
             } catch (err) {
-                console.error("Device detection error:", err);
+                console.error("[DeviceDetect] Error:", err);
             } finally {
                 liveDeviceRequestInFlightRef.current = false;
             }
@@ -276,8 +291,9 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
             liveSnakeRequestInFlightRef.current = true;
 
             try {
+                console.log('[Live Detection] Sending frame to backend /detect-live');
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 15000);
+                const timeoutId = setTimeout(() => controller.abort(), 60000);
                 const response = await fetch(`${API_BASE_URL}/detect-live`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -293,19 +309,33 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
                     setLiveDetections(snakeBoxes);
                     setLiveDeviceBoxes(data.device_boxes || []);
 
-                    // Static snake detection
-                    if (data.spoof_detected && !hasTriggeredRef.current && onLiveSpoofDetected) {
-                        hasTriggeredRef.current = true;
-                        setIsLiveDetecting(false);
-                        onLiveSpoofDetected({
-                            reason: data.spoof_reason || 'Screen/device detected',
-                            timestamp: new Date().toLocaleTimeString(),
-                            confidence: data.confidence || 0,
-                        });
-                        return;
+                    // Phone/Screen spoof detection with consecutive frame requirement
+                    if (data.spoof_detected) {
+                        consecutiveSpoofDetectionsRef.current++;
+                        setConsecutiveSpoofDetections(consecutiveSpoofDetectionsRef.current);
+
+                        // Only trigger alert after N consecutive frames
+                        if (consecutiveSpoofDetectionsRef.current >= FRAMES_REQUIRED_FOR_SPOOF && !hasTriggeredRef.current && onLiveSpoofDetected) {
+                            hasTriggeredRef.current = true;
+                            setIsLiveDetecting(false);
+                            onLiveSpoofDetected({
+                                reason: data.spoof_reason || 'Screen/device detected',
+                                timestamp: new Date().toLocaleTimeString(),
+                                confidence: data.confidence || 0,
+                            });
+                            return;
+                        }
+                    } else {
+                        // Reset spoof counter when no spoof detected
+                        consecutiveSpoofDetectionsRef.current = 0;
+                        setConsecutiveSpoofDetections(0);
                     }
 
                     if (data.detected && snakeBoxes.length > 0) {
+                        // Increment consecutive detections counter
+                        consecutiveDetectionsRef.current++;
+                        setConsecutiveDetections(consecutiveDetectionsRef.current);
+
                         const centroid = { x: snakeBoxes[0].x, y: snakeBoxes[0].y };
                         snakePositionHistoryRef.current.push(centroid);
                         if (snakePositionHistoryRef.current.length > 5) snakePositionHistoryRef.current.shift();
@@ -314,48 +344,52 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
                             const ys = snakePositionHistoryRef.current.map(p => p.y);
                             setStaticWarning(Math.max(...xs) - Math.min(...xs) < 10 && Math.max(...ys) - Math.min(...ys) < 10);
                         }
+
+                        // AUTO-TRIGGER: snake found and not spoof -> check consecutive detection count
+                        if (!data.spoof_detected && location && !hasTriggeredRef.current && consecutiveDetectionsRef.current >= FRAMES_REQUIRED_FOR_ALERT) {
+                            hasTriggeredRef.current = true;
+                            setIsLiveDetecting(false);
+
+                            const snapshot = webcamRef.current.getScreenshot();
+                            const imageToUse = snapshot || imageSrc;
+                            const fetchRes = await fetch(imageToUse);
+                            const blob = await fetchRes.blob();
+                            const frameFile = new File([blob], `live_threat_${Date.now()}.jpg`, { type: 'image/jpeg' });
+
+                            setFile(frameFile);
+
+                            if (onLiveSnakeDetected) {
+                                onLiveSnakeDetected({
+                                    confidence: Number(data.confidence) || (snakeBoxes[0]?.confidence ? Number((snakeBoxes[0].confidence * 100).toFixed(1)) : 0),
+                                    status: 'SNAKE DETECTED',
+                                    imagePath: '',
+                                    timestamp: new Date().toLocaleTimeString(),
+                                });
+                            }
+
+                            if (onAnalyze) {
+                                // Heavy backend confirmation runs in background so alert UI is instant.
+                                onAnalyze(frameFile, { silent: true }).catch((err) => {
+                                    console.error('Background analyze failed:', err);
+                                });
+                            }
+                        }
                     } else {
+                        // Reset counter when no detection
+                        consecutiveDetectionsRef.current = 0;
+                        setConsecutiveDetections(0);
                         snakePositionHistoryRef.current = [];
                         setStaticWarning(false);
-                    }
-
-                    // AUTO-TRIGGER: snake found and not spoof -> show alert screen immediately
-                    if (data.detected && snakeBoxes.length > 0 && !data.spoof_detected && location && !hasTriggeredRef.current) {
-                        hasTriggeredRef.current = true;
-                        setIsLiveDetecting(false);
-
-                        const snapshot = webcamRef.current.getScreenshot();
-                        const imageToUse = snapshot || imageSrc;
-                        const fetchRes = await fetch(imageToUse);
-                        const blob = await fetchRes.blob();
-                        const frameFile = new File([blob], `live_threat_${Date.now()}.jpg`, { type: 'image/jpeg' });
-
-                        setFile(frameFile);
-
-                        if (onLiveSnakeDetected) {
-                            onLiveSnakeDetected({
-                                confidence: Number(data.confidence) || (snakeBoxes[0]?.confidence ? Number((snakeBoxes[0].confidence * 100).toFixed(1)) : 0),
-                                status: 'SNAKE DETECTED',
-                                imagePath: '',
-                                timestamp: new Date().toLocaleTimeString(),
-                            });
-                        }
-
-                        if (onAnalyze) {
-                            // Heavy backend confirmation runs in background so alert UI is instant.
-                            onAnalyze(frameFile, { silent: true }).catch((err) => {
-                                console.error('Background analyze failed:', err);
-                            });
-                        }
                     }
                 } else {
                     console.warn(`Live snake detection failed with status ${response.status}`);
                 }
             } catch (err) {
                 if (err?.name === 'AbortError') {
-                    console.warn('Live snake detection timed out (skipped frame).');
+                    console.warn('[Live Detection] /detect-live timed out after 60s; skipping this frame.');
+                } else {
+                    console.error("Snake detection error:", err);
                 }
-                console.error("Snake detection error:", err);
             } finally {
                 liveSnakeRequestInFlightRef.current = false;
             }
@@ -363,9 +397,13 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
 
         if (isLiveDetecting && isCameraActive && !hasTriggeredRef.current) {
             detectSnake(); // run immediately on enable
-            intervalId = setInterval(detectSnake, 1200);
+            intervalId = setInterval(detectSnake, 4500);
         } else {
             setLiveDetections([]);
+            setConsecutiveDetections(0);
+            consecutiveDetectionsRef.current = 0;
+            setConsecutiveSpoofDetections(0);
+            consecutiveSpoofDetectionsRef.current = 0;
             setStaticWarning(false);
             setMotionBox(null);
             if (canvasRef.current) {
@@ -646,6 +684,30 @@ export default function UploadScreen({ onAnalyze, onLiveSnakeDetected, onLiveSpo
                                                     <Crosshair size={14} className={isLiveDetecting ? "animate-spin-slow" : ""} />
                                                     {isLiveDetecting ? "ACTIVE TRACKING: ON" : "ENABLE LIVE TRACKING"}
                                                 </button>
+                                            )}
+
+                                            {/* Consecutive Detection Counter (Local mode only) */}
+                                            {isLiveDetecting && IS_LOCAL && consecutiveDetections > 0 && (
+                                                <div className={`border font-bold tracking-widest text-[10px] uppercase px-4 py-2 flex items-center gap-2 ${
+                                                    consecutiveDetections >= FRAMES_REQUIRED_FOR_ALERT
+                                                        ? 'bg-danger/30 border-danger text-danger animate-pulse'
+                                                        : 'bg-orange-500/20 border-orange-500 text-orange-400'
+                                                }`}>
+                                                    <Activity size={14} />
+                                                    SNAKE {consecutiveDetections}/{FRAMES_REQUIRED_FOR_ALERT}
+                                                </div>
+                                            )}
+
+                                            {/* Consecutive Spoof Detection Counter (Local mode only) */}
+                                            {isLiveDetecting && IS_LOCAL && consecutiveSpoofDetections > 0 && (
+                                                <div className={`border font-bold tracking-widest text-[10px] uppercase px-4 py-2 flex items-center gap-2 ${
+                                                    consecutiveSpoofDetections >= FRAMES_REQUIRED_FOR_SPOOF
+                                                        ? 'bg-yellow-500/30 border-yellow-500 text-yellow-300 animate-pulse'
+                                                        : 'bg-yellow-500/20 border-yellow-500 text-yellow-400'
+                                                }`}>
+                                                    <Activity size={14} />
+                                                    SCREEN {consecutiveSpoofDetections}/{FRAMES_REQUIRED_FOR_SPOOF}
+                                                </div>
                                             )}
 
                                             {capturing ? (
