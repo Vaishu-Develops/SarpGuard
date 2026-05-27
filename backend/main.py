@@ -280,28 +280,39 @@ async def detect_device(data: LiveFrame):
         np_arr = np.frombuffer(img_data, np.uint8)
         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         if frame is None:
+            print("[DeviceDetect] ⚠️ Frame decode failed", flush=True)
             return {"device_boxes": [], "is_screen": False, "reason": ""}
 
         device_boxes = []
         artifact_result = [False, 0.0, ""]
 
         def run_device():
-            results = get_device_model().predict(frame, classes=DEVICE_CLASSES, verbose=False)
-            for box in results[0].boxes:
-                xyxy = box.xyxy[0].cpu().numpy().tolist()
-                cls = int(box.cls[0].cpu().item())
-                conf = float(box.conf[0].cpu().item())
-                if conf > 0.15:  # Lower threshold for easier phone/screen detection at distance
-                    label = DEVICE_CLASS_NAMES.get(cls, f"Device({cls})")
-                    device_boxes.append({
-                        "x1": xyxy[0], "y1": xyxy[1],
-                        "x2": xyxy[2], "y2": xyxy[3],
-                        "confidence": conf,
-                        "label": label
-                    })
+            try:
+                results = get_device_model().predict(frame, classes=DEVICE_CLASSES, verbose=False)
+                for box in results[0].boxes:
+                    xyxy = box.xyxy[0].cpu().numpy().tolist()
+                    cls = int(box.cls[0].cpu().item())
+                    conf = float(box.conf[0].cpu().item())
+                    if conf > 0.15:  # Lower threshold for easier phone/screen detection at distance
+                        label = DEVICE_CLASS_NAMES.get(cls, f"Device({cls})")
+                        device_boxes.append({
+                            "x1": xyxy[0], "y1": xyxy[1],
+                            "x2": xyxy[2], "y2": xyxy[3],
+                            "confidence": conf,
+                            "label": label
+                        })
+            except Exception as e:
+                print(f"[DeviceDetect] Error in run_device: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
 
         def run_artifact():
-            artifact_result[0], artifact_result[1], artifact_result[2] = detect_screen_artifact(frame)
+            try:
+                artifact_result[0], artifact_result[1], artifact_result[2] = detect_screen_artifact(frame)
+            except Exception as e:
+                print(f"[DeviceDetect] Error in run_artifact: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
 
         t1 = threading.Thread(target=run_device)
         t2 = threading.Thread(target=run_artifact)
@@ -309,7 +320,7 @@ async def detect_device(data: LiveFrame):
         t1.join(); t2.join()
 
         is_screen, score, reason = artifact_result
-        print(f"[DeviceDetect] devices={len(device_boxes)} is_screen={is_screen} score={score:.2f}", flush=True)
+        print(f"[DeviceDetect] ✅ devices={len(device_boxes)} is_screen={is_screen} score={score:.2f}", flush=True)
 
         return {
             "device_boxes": device_boxes,
@@ -318,8 +329,10 @@ async def detect_device(data: LiveFrame):
         }
 
     except Exception as e:
-        print(f"[DeviceDetect] Error: {e}", flush=True)
-        return {"device_boxes": [], "is_screen": False, "reason": ""}
+        print(f"[DeviceDetect] ❌ FATAL Error: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return {"device_boxes": [], "is_screen": False, "reason": str(e)}
 
 @app.post("/log-tamper")
 async def log_tamper(data: TamperLog):
