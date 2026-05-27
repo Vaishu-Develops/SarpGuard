@@ -4,8 +4,9 @@ import ProcessingScreen from './components/ProcessingScreen';
 import SnakeDetectedScreen from './components/SnakeDetectedScreen';
 import AllClearScreen from './components/AllClearScreen';
 import SpoofWarningScreen from './components/SpoofWarningScreen';
+import { getApiBaseUrl } from './lib/apiBase';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE_URL = getApiBaseUrl();
 
 const LOCATIONS = {
     'block-a': { name: 'Block A - Main Entrance' },
@@ -93,6 +94,13 @@ export default function App() {
                 resultImagePath = data.image_path ? `${API_BASE_URL}${data.image_path}` : '';
                 resultTimestamp = data.timestamp || '';
                 
+                console.log('[App] Backend response:', {
+                    status: data.status,
+                    image_path: data.image_path,
+                    final_imagePath: resultImagePath,
+                    api_base_url: API_BASE_URL
+                });
+                
                 setHasSnake(resultHasSnake);
                 setConfidence(resultConfidence);
                 setSnakeStatus(resultStatus);
@@ -148,8 +156,42 @@ export default function App() {
         }
     }, [isReady, screen, handleProcessingComplete]);
 
-    const handleLogTamper = () => {
-        console.log("Tamper incident logged to system history.");
+    const handleLogTamper = async () => {
+        try {
+            console.log('[LogTamper] 🔴 USER CLICKED LOG TAMPER BUTTON');
+            console.log('[LogTamper] Location:', locationName);
+            console.log('[LogTamper] Confidence:', confidence);
+            console.log('[LogTamper] Reason:', spoofReason);
+            
+            const payload = {
+                location: locationName || 'Unknown Location',
+                spoof_confidence: confidence,
+                reason: spoofReason || 'Phone screen or video detected'
+            };
+            console.log('[LogTamper] Sending payload:', JSON.stringify(payload));
+            
+            const response = await fetch(`${API_BASE_URL}/log-tamper`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            console.log('[LogTamper] Response status:', response.status);
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log('[LogTamper] ✅ SUCCESS - Incident logged:', data);
+                alert('✅ Tamper incident logged! Security team notified.');
+            } else {
+                console.warn(`[LogTamper] ⚠️ Failed with status ${response.status}`);
+                const errorData = await response.text();
+                console.warn('[LogTamper] Error response:', errorData);
+                alert(`⚠️ Failed to log incident (Status: ${response.status})`);
+            }
+        } catch (err) {
+            console.error('[LogTamper] ❌ Error logging tamper incident:', err);
+            alert('❌ Error: Could not log tamper incident. Check console.');
+        }
     };
 
     const handleReset = () => {
