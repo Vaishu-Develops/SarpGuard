@@ -67,7 +67,16 @@ export default function SnakeDetectedScreen({ onReset, locationName, confidence,
 
                         {/* Real video frame overlay */}
                         {imagePath ? (
-                            <img src={imagePath} alt="Detected threat" className={`relative z-10 w-full h-full object-contain border border-slate-700 shadow-[0_0_20px_rgba(0,0,0,0.8)]`} />
+                            <img 
+                                src={imagePath} 
+                                alt="Detected threat" 
+                                className={`relative z-10 w-full h-full object-contain border border-slate-700 shadow-[0_0_20px_rgba(0,0,0,0.8)]`}
+                                onLoad={() => console.log('[SnakeDetected] ✅ Image loaded:', imagePath)}
+                                onError={(e) => {
+                                    console.error('[SnakeDetected] ❌ Image failed to load:', imagePath);
+                                    console.error('[SnakeDetected] Error:', e);
+                                }}
+                            />
                         ) : (
                             <div className="relative z-10 flex flex-col items-center justify-center text-slate-500 text-xs font-mono tracking-widest gap-2">
                                 <AlertTriangle size={24} />
