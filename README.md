@@ -1,21 +1,20 @@
-<img src="https://capsule-render.vercel.app/api?type=waving&color=FF4500&height=220&section=header&text=SarpGuard%20%F0%9F%90%8D&fontSize=56&fontColor=ffffff&animation=fadeIn&fontAlignY=38&desc=AI%20Snake%20Detection%20%26%20Venom%20Classification&descAlignY=58&descSize=22&descColor=ffffff" width="100%" />
+# 🐍 SarpGuard - AI Snake Detection & Venom Classification
 
 <div align="center">
+
+**AI-powered snake detection, venom classification & real-time WhatsApp alerts for residential safety.**
 
 <p align="center">
   <img src="https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge&logo=github" />
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" />
-  <img src="https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" />
+  <img src="https://img.shields.io/badge/React-61DAFB?style=for-the-badge&logo=react&logoColor=black" />
+  <img src="https://img.shields.io/badge/YOLOv8-00D4FF?style=for-the-badge&logo=yolo&logoColor=white" />
   <img src="https://img.shields.io/badge/Roboflow-purple?style=for-the-badge&logo=roboflow&logoColor=white" />
   <img src="https://img.shields.io/badge/Twilio-F22F46?style=for-the-badge&logo=twilio&logoColor=white" />
 </p>
 
-<p align="center">
-  <b>AI-powered snake detection, venom classification & real-time WhatsApp alerts for residential safety.</b>
-</p>
-
-[Features](#-features) • [Architecture](#-architecture) • [Quick Start](#-quick-start) • [API](#-api-endpoints) • [Tech Stack](#-tech-stack)
+[Features](#-features) • [How It Works](#-how-it-works) • [Architecture](#-architecture) • [Quick Start](#-quick-start) • [API](#-api-endpoints) • [Tech Stack](#-tech-stack)
 
 </div>
 
